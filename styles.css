@@ -51,6 +51,7 @@ body::before {
 button {
   color: inherit;
   font: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button:focus-visible {
@@ -1199,8 +1200,18 @@ h1 span {
 }
 
 .facility-item.dragging {
+  opacity: 0;
+  filter: none;
   transform: translate(-50%, var(--item-anchor-y)) scale(.96);
   pointer-events: none;
+}
+
+.facility-item:active,
+.facility-item:focus,
+.facility-item:focus-visible {
+  outline: none;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .facility-item.seed-drop-target {
@@ -1902,6 +1913,9 @@ h1 span {
   display: grid;
   gap: 7px;
   margin: 13px 0 17px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .seed-option {
@@ -1916,7 +1930,7 @@ h1 span {
   background: rgba(12, 28, 22, 0.7);
   cursor: pointer;
   text-align: left;
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
 }
 

@@ -56,6 +56,7 @@ let selectedBaseId = null;
 let placementSelection = null;
 let dragPayload = null;
 let pointerDrag = null;
+let pendingSeedDrag = null;
 let harvestSwipe = null;
 let harvestHold = null;
 let facilityPan = null;
@@ -4689,6 +4690,16 @@ function bindEvents() {
       return;
     }
     if (seed && state.seeds[seed.dataset.dragCrop] > 0) {
+      if (event.pointerType !== "mouse") {
+        pendingSeedDrag = {
+          source: seed,
+          pointerId: event.pointerId,
+          cropId: seed.dataset.dragCrop,
+          startX: event.clientX,
+          startY: event.clientY
+        };
+        return;
+      }
       dragPayload = { type: "seed", cropId: seed.dataset.dragCrop };
     } else if (equipment && opaqueEquipment) {
       dragPayload = { type: "equipment", kind: equipment.dataset.dragKind, id: equipment.dataset.dragId };
@@ -4713,6 +4724,19 @@ function bindEvents() {
   document.addEventListener("pointermove", (event) => {
     if (updateCleanToolDrag(event)) return;
     if (updateEquipmentMenu(event)) return;
+    if (pendingSeedDrag && event.pointerId === pendingSeedDrag.pointerId) {
+      const dx = event.clientX - pendingSeedDrag.startX;
+      const dy = event.clientY - pendingSeedDrag.startY;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 9) return;
+      if (Math.abs(dy) > Math.abs(dx) * 1.15) {
+        pendingSeedDrag = null;
+        return;
+      }
+      const pending = pendingSeedDrag;
+      pendingSeedDrag = null;
+      beginPointerDrag(pending.source, event, { type: "seed", cropId: pending.cropId }, pending.startX, pending.startY);
+    }
     if (harvestHold && event.pointerId === harvestHold.pointerId) {
       const distance = Math.hypot(event.clientX - harvestHold.startX, event.clientY - harvestHold.startY);
       if (distance < 9) {
@@ -4826,6 +4850,10 @@ function bindEvents() {
       harvestSwipe = null;
       return;
     }
+    if (pendingSeedDrag && event.pointerId === pendingSeedDrag.pointerId) {
+      pendingSeedDrag = null;
+      return;
+    }
     if (facilityPan && event.pointerId === facilityPan.pointerId) {
       const shell = document.querySelector(".facility-grid-shell");
       if (shell) shell.classList.remove("panning");
@@ -4874,6 +4902,7 @@ function bindEvents() {
     if (cleanToolDrag && event.pointerId === cleanToolDrag.pointerId) clearCleanToolDrag();
     if (equipmentMenu && event.pointerId === equipmentMenu.pointerId) clearEquipmentMenu();
     if (equipmentMenuTimer && event.pointerId === equipmentMenuTimer.pointerId) cancelEquipmentMenuTimer();
+    if (pendingSeedDrag && event.pointerId === pendingSeedDrag.pointerId) pendingSeedDrag = null;
     if (harvestHold && event.pointerId === harvestHold.pointerId) harvestHold = null;
     if (harvestSwipe && event.pointerId === harvestSwipe.pointerId) harvestSwipe = null;
     if (facilityPan && event.pointerId === facilityPan.pointerId) {
@@ -4966,6 +4995,7 @@ function bindEvents() {
 
 function clearDragState() {
   dragPayload = null;
+  pendingSeedDrag = null;
   if (pointerDrag && pointerDrag.ghost) pointerDrag.ghost.remove();
   pointerDrag = null;
   document.body.classList.remove("drag-active", "equipment-drag-active");
