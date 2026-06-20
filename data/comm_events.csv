@@ -1,0 +1,26 @@
+﻿id,trigger,speakerName,speakerRole,icon,kicker,title,body,choices,once,priority,blocking
+prologue_inner_voice_v4,game_start,オペレーター,主人公,assets/characters/protagonist.webp,PRIVATE MEMO,最初の夜,下層の空気は湿っている。消毒剤と錆の匂いの奥に、まだ本物の緑を覚えている場所がある。|これは農場じゃない。地下に残された小さな抵抗だ。|まずはマラが流してくれたポッドを起動する。,ok=端末を起動する,true,130,true
+mara_pod_delivery_v4,game_start,マラ,種ブローカー,assets/characters/seed-broker.webp,ENCRYPTED DELIVERY,最初のポッド,端末は見えてる？ なら十分。あなた宛てに中古の栽培ポッドを一台流しておいた。請求は後回し。|レタスの種も少し入ってる。まずは配置して植えな。闇市場も調達端末も信用ができるまでは開かない。,ok=ポッドを確認,true,120,true
+welcome_v4,game_start,マラ,種ブローカー,assets/characters/seed-broker.webp,ENCRYPTED COMMS,最初の手順,ここでは光と水と沈黙が命綱だ。|最初の収穫ができたら下層市場から連絡が来る。売れたら調達端末の接続を渡すよ。,ok=了解,true,100,true
+first_place_v4,first_place,端末OS,配置補助AI,assets/icons/shelf.webp,LAYOUT ASSIST,床面固定,設備固定を確認。床面 排水 電源ノイズはいずれも許容範囲内です。|許容範囲という言葉は地下では「まだ死なない」と同義です。,ok=確認,true,94,true
+first_plant_v4,first_plant,マラ,種ブローカー,assets/characters/seed-broker.webp,SEED TRACE,最初の芽,いいね。種は小さいけど記録よりずっと頑固だ。|水と養液を切らすな。植物は裏切らないけど設備はよく裏切る。,ok=了解,true,90,true
+waiting_growth_v4,first_plant,オペレーター,主人公,assets/characters/protagonist.webp,PRIVATE MEMO,待つ時間,植物を育てる時間は導火線を見つめる時間に似ている。何かが起きるまで端末の数字を見続ける。|水量 養液 温度 湿度。祈りを数字に変えると少しだけ手が震えなくなる。,ok=監視を続ける,true,89,true
+first_harvest_v4,first_harvest,カイ,下層市場,assets/characters/market-lower.webp,LOWNET PING,本物の葉,収穫したならまず下層に流してくれ。こっちは合成ペーストで舌が死にかけてる。|高くは買えない。でも本当に必要としているのはこっちだ。,lower=下層に回す|later=考える,true,85,true
+first_sale_v4,first_sale,カイ,下層市場,assets/characters/market-lower.webp,TRANSFER CONFIRMED,配給所のざわめき,入荷を確認した。数は少ないが今夜の空気が少し変わったよ。|金額だけ見れば薄い商売だ。けど地下では薄いものほど長く効く。,ok=ログを閉じる,true,80,true
+shop_unlock_v4,shop_unlocked_after_lettuce,マラ,種ブローカー,assets/characters/seed-broker.webp,PROCUREMENT ACCESS,調達端末解放,最初の売上を確認した。これで最低限の信用はできた。|調達端末のロックを外す。まずは補給とPOD増設。ここから先は何を増やすかで農場の性格が決まる。,open=調達端末を開く|later=後で見る,true,77,true
+tutorial_time_reflection_v1,tutorial_time_reflection,オペレーター,主人公,assets/characters/protagonist.webp,PRIVATE MEMO,時間の感触,調達端末の応答音が、地下の静けさに小さな穴を開けた。|私の時間が再び動き出した気がする。,ok=息を整える,true,79,true
+tutorial_time_start_v1,tutorial_time_start,端末OS,栽培管理AI,assets/icons/locked.webp,SYSTEM NOTICE,リアルタイム運用開始,ここからはゲーム内の時間が進行していきます。|作物の成長、設備の汚れ、日次の市場変動が継続的に処理されます。,ok=運用を開始,true,78,true
+first_cleaning_needed_v1,first_cleaning_needed,端末OS,清掃管理AI,assets/icons/clean-brush.webp,MAINTENANCE ALERT,清掃サイクル,設備表面の汚染値が許容ラインを超えました。清掃せずに運用を続けると効率低下と品質低下の原因になります。|栽培区画内のブラシまたはバケツを設備へドラッグして清掃してください。,ok=清掃する,true,78,true
+unlock_basil_v1,unlock_basil,マラ,種ブローカー,assets/characters/seed-broker.webp,SEED ROUTE,香草種子の小口便,少しずつだけど流れができてきた。食料だけじゃなく香りのある葉も欲しがる客がいる。|バジルの種子を回す。PODを増やしてから試すと失敗しにくい。,open=調達端末を見る|later=後で見る,true,76,true
+unlock_box_v1,unlock_box,マラ,種ブローカー,assets/characters/seed-broker.webp,HARDWARE ROUTE,栽培ボックス入荷,一株ずつの世話は覚えたみたいだね。次はまとめて回す箱を扱える。|栽培ボックスを調達端末に出した。置き場所と資金を見てから買いな。,open=調達端末を見る|later=後で見る,true,76,true
+unlock_devices_v1,unlock_devices,端末OS,配置補助AI,assets/icons/led.webp,ENVIRONMENT KIT,環境補助設備解放,中型設備の稼働を確認。光量と空気の偏りを補正する補助設備が使用可能になりました。|LED ファン タンクを調達端末に追加します。狭い区画では配置に注意してください。,open=調達端末を見る|later=後で見る,true,74,true
+unlock_storage_v1,unlock_storage,端末OS,栽培管理AI,assets/icons/filter.webp,STABILITY KIT,保管と濾過の提案,収穫量が増えています。廃棄と補給費が利益を削る前に恒久設備を検討してください。|水フィルターと冷蔵保管箱の調達経路を開きます。,open=調達端末を見る|later=後で見る,true,73,true
+medical_unlock_v4,market_medical_unlocked,ドクター・イオ,医療・実験区画,assets/characters/market-medical.webp,SECURE MEDICAL LINE,紹介コード認証,あなたの作物サンプルを確認しました。清潔性は十分。出所は不問です。|治療薬の原料になる植物を扱えるなら医療実験区画は相応の対価を提示します。,accept=接続を保持|ignore=保留,true,75,true
+property_broker_open_v4,property_broker_unlocked,キド,不動産ブローカー,assets/characters/property-broker-black.png,BROKER ACCESS,隠し区画の紹介,BOXを回して数字も出した。今の排水室だけじゃすぐ詰まるだろう。|表の台帳には載らない栽培区画を扱っている。広さも穴も値段も毎回違う。図面を見て欲しけりゃ契約しな。,open=物件を見る|later=後で見る,true,74,true
+upper_unlock_v4,market_upper_unlocked,セラ・ヴェイル,上層フィクサー,assets/characters/market-upper.webp,PRIVATE CHANNEL,上層からの視線,あなた下で面白いものを育てているそうね。上の食卓には希少性という調味料が必要なの。|日常野菜はいらない。美しい果実だけ持ってきて。,accept=条件を見る|ignore=無視する,true,75,true
+rebel_unlock_v4,market_rebel_unlocked,ナギ,地下補給局,assets/characters/market-rebel.webp,PIRATE SIGNAL,補給網からの接触,下層に流した食糧の一部がこっちにも届いた。あんたの農場はただの商売で終わらないかもしれない。|食糧は人を動かす。毒草は歴史を動かす。,accept=通信を保存|ignore=切断する,true,75,true
+sale_property_v4,property_sale_seen,キド,不動産ブローカー,assets/characters/property-broker-black.png,BROKER ALERT,穴あき物件,セール物件が混じってる。床が抜けてる？ そうとも言う。|だが使えるマスだけ見れば掘り出し物もある。図面を見て判断しな。,ok=図面を見る,true,70,false
+lower_discontent_medical_v4,medical_specialty_sale,カイ,下層市場,assets/characters/market-lower.webp,LOWNET COMPLAINT,列の外へ,医療区画にハーブを流したって聞いた。責める気はない。あっちは金を出すからな。|ただ下層の列は今日も長い。緑がどこへ消えたのか皆だいたい分かってる。,ok=沈黙する|explain=事情を説明する,true,73,false
+relocated_v4,relocate,キド,不動産ブローカー,assets/characters/property-broker-black.png,CONTRACT CLOSED,追加拠点,契約完了。記録上この区画は存在しない。これであんたの農場は一か所じゃなくなった。|拠点タブで操作対象を切り替えろ。空間は使って初めて拠点になる。,ok=了解,true,70,true
+resource_low_v4,resource_low,端末OS,栽培管理AI,assets/icons/water.webp,SYSTEM WARNING,資源残量低下,水または養液の残量が危険域です。継続消費型設備の作物は枯死リスクが上昇します。|警告を無視した場合 収穫予定は保証されません。,ok=補給する|ignore=無視,true,65,false
+

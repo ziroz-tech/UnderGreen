@@ -1,0 +1,3 @@
+id,name,code,width,height,radius,upkeep,icon,sprite,color
+light,区画LEDライト,AREA LIGHT,1,1,2,4,assets/icons/led.webp,assets/equipment/light-iso-tall-v2.png,#f5d65b
+fan,区画循環ファン,AREA FAN,1,1,2,3,assets/icons/fan.webp,assets/equipment/fan-iso-tall-v2.png,#48dbea

@@ -1,0 +1,54 @@
+key,selector,attribute,text
+document_title,title,text,UNDERGREEN | 違法水耕栽培シミュレーション
+player_role,.player-profile small,text,ILLEGAL GROWER
+player_name,.player-profile strong,text,オペレーター
+reset_button,#reset-button,title,ニューゲーム
+reset_button_aria,#reset-button,aria-label,ニューゲーム
+resource_strip_label,.resource-strip,aria-label,保有資源
+news_initial,#news-text,text,通信傍受中... 市場データを復号しています。
+tabs_label,.tabs,aria-label,ゲーム画面
+tab_farm,".tab[data-tab='farm']",html,<span>01</span>栽培区画
+tab_market,".tab[data-tab='market']",html,<span>02</span>闇市場
+tab_shop,".tab[data-tab='shop']",html,<span>03</span>調達端末
+tab_broker,".tab[data-tab='broker']",html,<span>04</span>不動産ブローカー
+farm_title,#farm-screen h2,text,栽培区画
+market_title,#market-screen h2,text,闇市場
+shop_title,#shop-screen h2,text,調達端末
+broker_title,#broker-screen h2,text,不動産ブローカー
+stock_label,#farm-screen .panel-title:nth-of-type(1) span,text,INSTALLATION STOCK
+stock_help,#farm-screen .panel-title:nth-of-type(1) small,text,設備を選んで配置
+seed_vault_label,#farm-screen .panel-title:nth-of-type(2) span,text,SEED VAULT
+seed_vault_help,#farm-screen .panel-title:nth-of-type(2) small,text,植える種を選択
+farm_help,.help-text,text,種を空きスロットへ、設備をグリッドへドラッグして操作できます。クリック操作も併用できます。
+quotes_subtitle,.price-board .section-label small,text,本日の単価 / B品質
+inventory_subtitle,.inventory-panel .section-label small,text,収穫物を選んで売却
+shop_connection,#shop-screen .heading-stats strong,text,廃棄区画 NODE-17
+seed_broker_name,.broker-panel h3,text,種ブローカー「マラ」
+seed_broker_quote,.broker-panel p:last-child,text,「種は記憶だよ。育てられる者にだけ、旧世界は芽を出す。」
+seed_catalog_subtitle,.shop-section:nth-of-type(1) .section-label small,text,違法種子アーカイブ
+hardware_subtitle,.shop-section:nth-of-type(2) .section-label small,text,資源・設備
+property_broker_name,.property-contact h3,text,地下不動産仲介人「キド」
+property_broker_copy,.property-contact p:last-child,text,管理局の台帳から消えた空間だけを扱う。物件名、面積、契約条件は訪れるたびに変化する。
+refresh_properties,#refresh-properties,text,物件を更新 ₡100
+status_initial,#status-text,text,システム起動完了。マラから届いた栽培ポッドを配置してください。
+modal_title,#modal-title,text,作戦結果
+modal_close,#modal-close,text,続ける
+modal_reset,#modal-reset,text,ニューゲーム
+log_initial,,,システム起動完了。マラから届いた栽培ポッドを配置してください。
+comms_next,,,次へ
+comms_close,,,閉じる
+comms_close_aria,#comms-close,aria-label,通信を閉じる
+favicon,"link[rel='icon']",href,assets/icons/seed.webp
+player_portrait,.player-profile img,src,assets/characters/protagonist.webp
+player_portrait_alt,.player-profile img,alt,主人公
+resource_credit_icon,.resource-card.credit .resource-image,src,assets/icons/credit.webp
+resource_water_icon,#water-card .resource-image,src,assets/icons/water.webp
+resource_nutrient_icon,#nutrient-card .resource-image,src,assets/icons/nutrient.webp
+resource_capacity_icon,.resource-strip .resource-card:nth-child(5) .resource-image,src,assets/icons/shelf.webp
+seed_broker_portrait,.broker-panel img,src,assets/characters/seed-broker.webp
+seed_broker_portrait_alt,.broker-panel img,alt,種ブローカーのマラ
+property_broker_portrait,.property-contact img,src,assets/characters/property-broker-black.png
+property_broker_portrait_alt,.property-contact img,alt,不動産ブローカー
+comms_default_icon,#comms-icon,src,assets/characters/seed-broker.webp
+comms_fallback_icon,,,assets/icons/credit.webp
+procurement_refresh_icon,,,assets/icons/seed.webp

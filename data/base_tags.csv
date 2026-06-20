@@ -1,0 +1,7 @@
+id,name,text,effects
+cool,Cool Leak,Lower temperature. Leaf crops tighten; fruit slows.,temp:-2|leafGrowth:1.08|fruitGrowth:0.94
+humid,Humid Zone,Moist air favors leaves and herbs.,humidity:8|leafGrowth:1.06|herbGrowth:1.06
+dry,Dry Floor,Less mold; more water loss.,humidity:-8|waterMod:1.08|dirtMod:0.85
+stablePower,Stable Power,Device upkeep is reduced.,deviceUpkeepMod:0.85
+oldMold,Old Mold,Dirt rises faster; herbs gain character.,dirtMod:1.25|herbQuality:0.06
+sealed,Good Seal,CO2 control is easier.,co2:80|co2Tolerance:1.18

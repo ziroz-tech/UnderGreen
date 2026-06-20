@@ -1,0 +1,10 @@
+id,cropId,stage1,stage2,stage3,stage4,stage5
+lettuce,lettuce,assets/plants/growth/lettuce-stage-1.png,assets/plants/growth/lettuce-stage-2.png,assets/plants/growth/lettuce-stage-3.png,assets/plants/growth/lettuce-stage-4.png,assets/plants/growth/lettuce-stage-5.png
+spinach,spinach,assets/plants/growth/spinach-stage-1.png,assets/plants/growth/spinach-stage-2.png,assets/plants/growth/spinach-stage-3.png,assets/plants/growth/spinach-stage-4.png,assets/plants/growth/spinach-stage-5.png
+basil,basil,assets/plants/growth/basil-stage-1.png,assets/plants/growth/basil-stage-2.png,assets/plants/growth/basil-stage-3.png,assets/plants/growth/basil-stage-4.png,assets/plants/growth/basil-stage-5.png
+tomato,tomato,assets/plants/growth/tomato-stage-1.png,assets/plants/growth/tomato-stage-2.png,assets/plants/growth/tomato-stage-3.png,assets/plants/growth/tomato-stage-4.png,assets/plants/growth/tomato-stage-5.png
+strawberry,strawberry,assets/plants/growth/strawberry-stage-1.png,assets/plants/growth/strawberry-stage-2.png,assets/plants/growth/strawberry-stage-3.png,assets/plants/growth/strawberry-stage-4.png,assets/plants/growth/strawberry-stage-5.png
+melon,melon,assets/plants/growth/melon-stage-1.png,assets/plants/growth/melon-stage-2.png,assets/plants/growth/melon-stage-3.png,assets/plants/growth/melon-stage-4.png,assets/plants/growth/melon-stage-5.png
+chamomile,chamomile,assets/plants/growth/lettuce-stage-1.png,assets/plants/growth/chamomile-stage-2.png,assets/plants/growth/chamomile-stage-3.png,assets/plants/growth/chamomile-stage-4.png,assets/plants/growth/chamomile-stage-5.png
+rosemary,rosemary,assets/plants/growth/rosemary-stage-1.png,assets/plants/growth/rosemary-stage-2.png,assets/plants/growth/rosemary-stage-3.png,assets/plants/growth/rosemary-stage-4.png,assets/plants/growth/rosemary-stage-5.png
+aconite,aconite,assets/plants/growth/aconite-stage-1.png,assets/plants/growth/aconite-stage-2.png,assets/plants/growth/aconite-stage-3.png,assets/plants/growth/aconite-stage-4.png,assets/plants/growth/aconite-stage-5.png

@@ -1,0 +1,8 @@
+id,forecastText,activeText,label,leadDays,duration,allCropMod,cropMods,waterCostMod,fee
+inspection_food_surge,大規模調査団派遣予定。{leadDays}日後に食料需要急騰の可能性。,調査団が下層入り。携行食と配給向けに食料需要が急騰。,FOOD SURGE,6,3,1.25,lettuce:1.35|spinach:1.35|tomato:1.2,,
+nutrition_audit,医療区画で栄養監査の告知。{leadDays}日後に緑葉野菜の買い付け強化予定。,栄養監査が開始。レタスとほうれんそうが優先調達品に指定。,LEAF AUDIT,5,3,,lettuce:1.25|spinach:1.45,,
+old_world_banquet,上層で旧世界料理の晩餐会準備。{leadDays}日後に香草と赤い実の需要増が見込まれる。,晩餐会向けの仕入れ開始。バジルとトマトに高値がついている。,CUISINE BOOM,6,2,,basil:1.55|tomato:1.45,,
+water_ration_vote,水配給委員会の採決予定。{leadDays}日後に水価格が跳ねる可能性。,水配給制限が発令。水は高騰したが作物価格もわずかに上向き。,WATER ALERT,4,3,1.1,,2,
+market_crackdown,闇市摘発部隊の巡回予告。{leadDays}日後に危険手当と仲介料が上がる見込み。,摘発強化で取引リスク上昇。相場は上がったが仲介料も高い。,RISK TRADE,5,2,1.3,,,0.2
+medical_contract,医療区画が備蓄契約を準備。{leadDays}日後に薬効と栄養を持つ作物の需要増。,備蓄契約が発効。葉物と薬草系の作物が高く売れている。,MED CONTRACT,6,3,,spinach:1.35|chamomile:1.35|rosemary:1.35,,
+gift_season,富裕層の贈答シーズン告知。{leadDays}日後に見栄えのよい果実が不足する見込み。,贈答シーズンが始まった。イチゴとメロンが宝石箱のように扱われている。,GIFT FRUIT,7,3,,strawberry:1.5|melon:1.45,,

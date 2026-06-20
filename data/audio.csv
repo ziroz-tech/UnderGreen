@@ -1,0 +1,12 @@
+id,file
+click,assets/audio/ui-click.ogg
+place,assets/audio/drop-place.ogg
+plant,assets/audio/plant-soil.wav
+harvest,assets/audio/harvest-scissors.wav
+mature,assets/audio/mature-alert.wav
+sale,assets/audio/sale.ogg
+purchase,assets/audio/purchase.ogg
+alert,assets/audio/alert.ogg
+grab,assets/audio/drop-place.ogg
+brush,assets/audio/harvest-scissors.wav
+water_splash,assets/audio/plant-soil.wav

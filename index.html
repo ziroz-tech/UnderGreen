@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07110f">
+  <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
+  <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
+    <link rel="stylesheet" href="styles.css?v=62">
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">UG</div>
+        <div>
+          <p class="eyebrow">SHELTER AGRICULTURE // UNLICENSED</p>
+          <h1>UNDER<span>GREEN</span></h1>
+        </div>
+      </div>
+      <div class="player-profile">
+        <img src="assets/characters/protagonist.webp" alt="主人公">
+        <div><small>ILLEGAL GROWER</small><strong>オペレーター</strong></div>
+      </div>
+      <div class="day-counter">
+        <div class="day-readout">
+          <span>OPERATION DAY</span>
+          <strong><b id="day-value">01</b><span id="day-limit"> / 30</span></strong>
+          <div class="day-progress"><i id="day-progress-fill"></i></div>
+          <small id="time-remaining">20.0 SEC</small>
+        </div>
+      </div>
+      <button class="icon-button" id="reset-button" title="終了" aria-label="終了">⏻</button>
+    </header>
+
+    <section class="resource-strip" aria-label="保有資源">
+      <div class="resource-card credit">
+        <img class="resource-image" src="assets/icons/credit.webp" alt="">
+        <div><small>CREDITS</small><strong id="money-value">500</strong></div>
+      </div>
+      <div class="resource-card" id="water-card">
+        <img class="resource-image" src="assets/icons/water.webp" alt="">
+        <div><small>WATER <b id="water-alert"></b></small><strong><span id="water-value">20</span><i> UNIT</i></strong></div>
+      </div>
+      <div class="resource-card" id="nutrient-card">
+        <img class="resource-image" src="assets/icons/nutrient.webp" alt="">
+        <div><small>NUTRIENT <b id="nutrient-alert"></b></small><strong><span id="nutrient-value">20</span><i id="nutrient-capacity"> / 20</i></strong></div>
+      </div>
+      <div class="resource-card">
+        <span class="resource-icon">⌁</span>
+        <div><small>DAILY COST</small><strong>₡ <span id="upkeep-value">10</span></strong></div>
+      </div>
+      <div class="resource-card">
+        <img class="resource-image" src="assets/icons/shelf.webp" alt="">
+        <div><small>GROW CAPACITY</small><strong><span id="slot-value">0</span><i> SLOT</i></strong></div>
+      </div>
+    </section>
+
+    <section class="news-ticker">
+      <span class="live-dot"></span>
+      <strong>LOWNET NEWS</strong>
+      <div class="ticker-divider"></div>
+      <p id="news-text">通信傍受中... 市場データを復号しています。</p>
+      <span class="news-effect" id="news-effect">NO SIGNAL</span>
+      <button class="news-history-button" id="news-history-button" type="button">履歴</button>
+    </section>
+
+    <nav class="tabs" aria-label="ゲーム画面">
+      <button class="tab active" data-tab="farm"><span>01</span>栽培区画</button>
+      <button class="tab" data-tab="market"><span>02</span>闇市場</button>
+      <button class="tab" data-tab="shop"><span>03</span>調達端末</button>
+      <button class="tab" data-tab="broker"><span>04</span>不動産ブローカー</button>
+    </nav>
+
+    <main>
+      <section class="screen active" id="farm-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">GROW MODULES</p>
+            <h2>栽培区画</h2>
+          </div>
+          <div class="heading-stats" id="farm-summary"></div>
+        </div>
+        <div class="farm-layout">
+          <div class="facility-workspace">
+            <article class="base-banner" id="base-banner"></article>
+            <div class="facility-grid-shell">
+              <div class="facility-grid-toolbar" id="facility-grid-toolbar"></div>
+              <div class="facility-clean-tools" aria-label="Cleaning tools">
+                <button class="clean-tool-button tool-brush" data-clean-tool="brush" type="button" aria-label="Brush">
+                  <img class="clean-tool-icon" src="assets/icons/clean-brush.webp?v=2" alt="" draggable="false">
+                </button>
+                <button class="clean-tool-button tool-bucket" data-clean-tool="bucket" type="button" aria-label="Bucket">
+                  <img class="clean-tool-icon" src="assets/icons/clean-bucket.webp?v=2" alt="" draggable="false">
+                </button>
+              </div>
+              <div class="facility-grid" id="facility-grid"></div>
+              <div class="selected-unit-panel" id="selected-unit-panel"></div>
+            </div>
+          </div>
+          <aside class="side-panel">
+            <div class="panel-title">
+              <span>INSTALLATION STOCK</span>
+              <small>設備を選んで配置</small>
+            </div>
+            <div id="placement-palette" class="placement-palette"></div>
+            <div class="panel-title">
+              <span>SEED VAULT</span>
+              <small>植える種を選択</small>
+            </div>
+            <div id="seed-selector" class="seed-selector"></div>
+            <div class="system-readout">
+              <div><span>給水予測</span><strong id="water-demand">0 / DAY</strong></div>
+              <div><span>養液予測</span><strong id="nutrient-demand">0 / DAY</strong></div>
+              <div><span>栽培設備</span><strong id="unit-count">0 UNIT</strong></div>
+              <div><span>連続消費設備</span><strong id="continuous-count">0 UNIT</strong></div>
+            </div>
+            <p class="help-text">種を空きスロットへ、設備をグリッドへドラッグして操作できます。クリック操作も併用できます。</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="screen" id="market-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">BLACK MARKET EXCHANGE</p>
+            <h2>闇市場</h2>
+          </div>
+          <div class="heading-stats" id="inventory-summary"></div>
+        </div>
+        <div class="market-selector" id="market-selector"></div>
+        <div class="price-board">
+          <div class="section-label"><span>LIVE QUOTES</span><small>本日の単価 / B品質</small></div>
+          <div class="market-signal-row" id="market-signal-row"></div>
+          <div class="price-grid" id="price-grid"></div>
+        </div>
+        <div class="inventory-panel">
+          <div class="section-label"><span>HARVEST INVENTORY</span><small>収穫物を選んで売却</small></div>
+          <div id="inventory-list"></div>
+        </div>
+      </section>
+
+      <section class="screen" id="shop-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">PROCUREMENT TERMINAL</p>
+            <h2>調達端末</h2>
+          </div>
+          <div class="heading-stats"><span>接続先</span><strong>廃棄区画 NODE-17</strong></div>
+        </div>
+        <div class="contact-panel broker-panel">
+          <img src="assets/characters/seed-broker.webp" alt="種ブローカーのマラ">
+          <div>
+            <p class="eyebrow">ENCRYPTED VENDOR // MARA</p>
+            <h3>種ブローカー「マラ」</h3>
+            <p>「種は記憶だよ。育てられる者にだけ、旧世界は芽を出す。」</p>
+          </div>
+          <span>TRUSTED CONTACT</span>
+        </div>
+        <div class="shop-section">
+          <div class="section-label"><span>SEED CATALOG</span><small>違法種子アーカイブ</small></div>
+          <div class="shop-grid" id="seed-shop"></div>
+        </div>
+        <div class="shop-section">
+          <div class="section-label"><span>SUPPLIES & HARDWARE</span><small>資源・設備</small></div>
+          <div class="shop-grid equipment-grid" id="equipment-shop"></div>
+        </div>
+      </section>
+
+      <section class="screen" id="broker-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">ILLEGAL PROPERTY EXCHANGE</p>
+            <h2>不動産ブローカー</h2>
+          </div>
+          <div class="heading-stats" id="property-summary"></div>
+        </div>
+        <div class="contact-panel property-contact">
+          <img src="assets/characters/property-broker-black.png" alt="不動産ブローカー">
+          <div>
+            <p class="eyebrow">UTILITY SPACE BROKER // KIDO</p>
+            <h3>地下不動産仲介人「キド」</h3>
+            <p>管理局の台帳から消えた空間だけを扱う。物件名、面積、契約条件は訪れるたびに変化する。</p>
+          </div>
+          <button class="secondary-button" id="refresh-properties">物件を更新 ₡100</button>
+        </div>
+        <div class="property-grid" id="property-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="action-dock" aria-label="Operation controls">
+    <p id="status-text">System online. Place the grow pod Mara sent you.</p>
+    <button class="end-day-button" id="end-day-button">
+      <span><small id="time-control-label">REALTIME RUNNING</small><b id="time-control-text">一時停止</b></span>
+      <b id="time-control-icon">Ⅱ</b>
+    </button>
+  </footer>
+
+  <div class="start-screen hidden" id="start-screen" aria-hidden="true">
+    <section class="start-panel" role="dialog" aria-modal="true" aria-labelledby="start-title">
+      <div class="start-tools" aria-label="Start screen tools">
+        <button class="start-tool-button" id="start-mode-toggle" type="button" title="モード表示切替" aria-label="モード表示切替">⚙</button>
+        <button class="start-tool-button" id="record-export-button" type="button" title="記録書き出し" aria-label="記録書き出し">⇪</button>
+      </div>
+      <p class="eyebrow">SHELTER AGRICULTURE // UNLICENSED</p>
+      <h2 id="start-title">UNDER<span>GREEN</span></h2>
+      <p class="start-copy">地下の空き区画に接続しています。栽培端末を起動してください。</p>
+      <div class="start-status" id="start-status">SAVE SIGNAL SCAN...</div>
+      <div class="start-actions">
+        <button class="primary-button" id="start-continue">開始</button>
+        <button class="primary-button start-day30-button" id="start-day30">DAY30モード</button>
+        <button class="secondary-button" id="start-new">新規開始</button>
+      </div>
+      <div class="start-records">
+        <div class="start-records-head">
+          <p class="eyebrow" id="start-records-title">DAY30 RECORDS</p>
+          <span id="day30-record-count">0 RUNS</span>
+        </div>
+        <div class="day30-record-list" id="day30-record-list"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="confirm-widget hidden" id="confirm-widget" aria-hidden="true">
+    <section class="confirm-panel" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <p class="eyebrow" id="confirm-kicker">CONFIRM</p>
+      <h2 id="confirm-title">確認</h2>
+      <p id="confirm-copy"></p>
+      <div class="modal-actions">
+        <button class="secondary-button" id="confirm-cancel">戻る</button>
+        <button class="danger-button hidden" id="confirm-danger">記録消去</button>
+        <button class="primary-button" id="confirm-ok">実行</button>
+      </div>
+    </section>
+  </div>
+
+  <aside class="comms-banner hidden" id="comms-banner" aria-live="polite">
+    <div class="comms-speaker">
+      <img id="comms-icon" src="assets/characters/seed-broker.webp" alt="">
+      <div>
+        <small id="comms-kicker">ENCRYPTED COMMS</small>
+        <strong id="comms-speaker-name">---</strong>
+        <span id="comms-speaker-role">---</span>
+      </div>
+    </div>
+    <div class="comms-body">
+      <div class="comms-title-row">
+        <h3 id="comms-title">---</h3>
+        <button class="comms-close" id="comms-close" aria-label="通信を閉じる">×</button>
+      </div>
+      <p id="comms-text"></p>
+      <div class="comms-progress" id="comms-progress"></div>
+      <div class="comms-actions" id="comms-actions"></div>
+    </div>
+  </aside>
+
+  <div class="modal-backdrop hidden" id="modal-backdrop">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <p class="eyebrow" id="modal-kicker">OPERATION REPORT</p>
+      <h2 id="modal-title">作戦結果</h2>
+      <div id="modal-content"></div>
+      <div class="modal-actions">
+        <button class="secondary-button" id="modal-close">続ける</button>
+        <button class="primary-button" id="modal-reset">ニューゲーム</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="news-history-panel hidden" id="news-history-panel" aria-hidden="true">
+    <section class="news-history-window" role="dialog" aria-modal="true" aria-labelledby="news-history-title">
+      <div class="news-history-head">
+        <div>
+          <p class="eyebrow">LOWNET ARCHIVE</p>
+          <h2 id="news-history-title">ニュース履歴</h2>
+        </div>
+        <button class="news-history-close" id="news-history-close" type="button" aria-label="ニュース履歴を閉じる">×</button>
+      </div>
+      <div class="news-history-list" id="news-history-list"></div>
+    </section>
+  </div>
+
+  <div id="toast-container" aria-live="polite"></div>
+  <script src="game.js?v=83"></script>
+</body>
+</html>

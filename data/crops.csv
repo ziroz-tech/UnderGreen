@@ -1,0 +1,10 @@
+id,name,days,seedPrice,packSize,basePrice,water,nutrient,icon,color,note,unlock,category
+lettuce,レタス,1.5,60,6,60,1,1,assets/icons/lettuce.webp,#72ffb8,早い・安い・安定,lower,food
+spinach,ホウレンソウ,2,90,6,100,1,2,assets/icons/spinach.webp,#48e997,栄養需要が高い,lower,food
+basil,バジル,2.5,150,6,180,1,2,assets/icons/basil.webp,#a3ff62,香味野菜として全市場で流通,lower,food
+tomato,旧世界トマト,4,260,4,300,2,3,assets/icons/tomato.webp,#ff8d53,基幹食材だが管理が難しい,lower,food
+strawberry,イチゴ,3.5,270,3,400,2,3,assets/icons/strawberry.webp,#ff6680,上層向け高級果実,upper,luxury
+melon,培養メロン,5.5,620,2,1050,4,5,assets/icons/melon.webp,#d8f06d,富裕層専用の最高級果実,upper,luxury
+chamomile,カモミール,2.5,180,5,240,1,2,assets/icons/chamomile.webp,#f4e9a1,鎮静薬原料,medical,medical
+rosemary,ローズマリー,3,240,4,360,1,3,assets/icons/rosemary.webp,#7fc88a,医療・実験用の芳香ハーブ,medical,medical
+aconite,トリカブト,4.5,480,2,850,2,4,assets/icons/aconite.webp,#8f7cff,植物兵器転用が可能な禁制毒草,rebel,weapon

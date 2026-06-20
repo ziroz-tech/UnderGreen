@@ -1,0 +1,7 @@
+id,name,text,effects
+efficient,Efficient,Upkeep -20%,upkeepMod:0.8
+tuned,Tuned,Growth +8%,growthMod:1.08
+sealed,Sealed,Water use -10%,waterMod:0.9
+cleanCoat,Clean Coat,Dirt buildup -35%,dirtMod:0.65
+overclock,Overclock,Growth +16% / upkeep +25%,growthMod:1.16|upkeepMod:1.25
+fragile,Used,Price -15% / dirt +30%,priceMod:0.85|dirtMod:1.3
