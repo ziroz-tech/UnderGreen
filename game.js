@@ -50,6 +50,7 @@ const FACILITY_ZOOM_MIN = 0.65;
 const FACILITY_ZOOM_MAX = 1.8;
 const FACILITY_ZOOM_STEP = 0.12;
 const SPRITE_ALPHA_THRESHOLD = 18;
+const BOOT_ASSET_TIMEOUT_MS = 20000;
 const spriteAlphaCache = new Map();
 let state;
 let selectedSeed = "lettuce";
@@ -493,30 +494,49 @@ function collectBootImageAssets() {
   return [...urls];
 }
 
-function preloadImageAsset(url) {
+function preloadImageAsset(url, timeoutMs = BOOT_ASSET_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const image = new Image();
+    let settled = false;
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(url);
+    };
+    const timer = window.setTimeout(() => finish(new Error(`Image timed out: ${url}`)), timeoutMs);
     image.decoding = "async";
     image.onload = async () => {
       try {
         if (image.decode) await image.decode();
       } catch (error) {}
-      resolve(url);
+      finish();
     };
-    image.onerror = () => reject(new Error(`Image failed to load: ${url}`));
+    image.onerror = () => finish(new Error(`Image failed to load: ${url}`));
     image.src = url;
+    if (image.complete && image.naturalWidth > 0) image.onload();
   });
 }
 
 async function preloadBootAssets() {
   const urls = collectBootImageAssets();
+  const failures = [];
   let done = 0;
-  setBootLoadingProgress(done, urls.length, "画像素材を読み込んでいます...");
+  setBootLoadingProgress(done, urls.length, "\u753b\u50cf\u7d20\u6750\u3092\u78ba\u8a8d\u3057\u3066\u3044\u307e\u3059...");
   for (const url of urls) {
-    await preloadImageAsset(url);
+    setBootLoadingProgress(done, urls.length, `\u8aad\u307f\u8fbc\u307f\u4e2d (${done + 1}/${urls.length}): ${url}`);
+    try {
+      await preloadImageAsset(url);
+    } catch (error) {
+      failures.push({ url, message: error.message });
+      console.warn("Boot image preload skipped", url, error);
+    }
     done += 1;
-    setBootLoadingProgress(done, urls.length, `画像素材を読み込んでいます... ${url}`);
+    setBootLoadingProgress(done, urls.length, `\u78ba\u8a8d\u6e08\u307f (${done}/${urls.length}): ${url}`);
   }
+  window.BOOT_ASSET_FAILURES = failures;
+  if (failures.length) console.warn("Boot image preload completed with missing assets", failures);
 }
 
 function applyUiText(rows) {
