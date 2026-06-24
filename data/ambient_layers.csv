@@ -1,0 +1,14 @@
+id,label,file,volume,condition,description
+base_hum,地下設備の基礎ノイズ,assets/audio/ambient/base-hum.wav,0.20,always,常に薄く流れる低い機械音。
+pump_active,循環ポンプ,assets/audio/ambient/pump-loop.wav,0.14,time_running,ゲーム内時間が進行している時に重なるポンプ循環音。
+fan_layer,循環ファン,assets/audio/ambient/fan-loop.wav,0.11,fan_device,ファン設備が設置されている時に重なる風切り音。
+dirty_filter,汚染警告ノイズ,assets/audio/ambient/silent-carrier.wav,0.10,cleaning_needed,清掃が必要な設備がある時に重なる埋もれた警告ノイズ。
+market_lower,下層市場の雑踏,assets/audio/ambient/zattou_koukaonnrab.mp3,0.18,market:lower,闇市場タブで下層市場を選んでいる時に流れる雑踏。
+market_medical,医療区画の端末音,assets/audio/ambient/iryouku_koukaonnrab.mp3,0.16,market:medical,闇市場タブで医療区画を選んでいる時に流れる清潔な端末音。
+market_upper,上層市場の静かな回線,assets/audio/ambient/zyousou_koukaonnrab.mp3,0.15,market:upper,闇市場タブで上層市場を選んでいる時に流れる上品な通信音。
+market_rebel,抵抗組織の秘匿通信,assets/audio/ambient/market-rebel.wav,0.17,market:rebel,闇市場タブで抵抗組織を選んでいる時に流れる粗い通信音。
+base_safe_room,セーフルームの密閉振動,assets/audio/ambient/base-safe-room.wav,0.10,base_tier:safe_room,初期セーフルームを表示している時に重なる狭い密閉空間の振動音。
+base_drainage,排水区画の滴下音,assets/audio/ambient/base-drainage-room.wav,0.11,base_tier:drainage,排水系の購入拠点を表示している時に重なる水滴と低い反響音。
+base_tunnel,保守線の導管反響,assets/audio/ambient/base-maintenance-tunnel.wav,0.12,base_tier:tunnel,保守トンネル系の拠点を表示している時に重なる導管の反響音。
+base_freight,貨物区画の低い振動,assets/audio/ambient/base-freight-chamber.wav,0.13,base_tier:freight,貨物区画系の拠点を表示している時に重なる重い機械振動。
+base_station,廃駅の遠い残響,assets/audio/ambient/base-abandoned-station.wav,0.12,base_tier:station,廃駅系の拠点を表示している時に重なる遠い構内反響。

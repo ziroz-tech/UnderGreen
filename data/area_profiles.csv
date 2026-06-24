@@ -1,5 +1,5 @@
 id,areaNames,facilityNames,cols,rows,prices,upkeep,image,allowedUnits,traits
-drainage,第17排水層|旧浄水ブロック|下層排液区,封鎖排水室|廃ポンプ室|濾過設備庫,5-6,2-3,0-500,0-4,assets/bases/drainage-room.webp,pod|box,低天井|低家賃|棚設置不可
-tunnel,北部保守線|環状導管区|旧送電トンネル,保守員居住区|機材待避室|地下作業室,6-8,4-5,2600-4200,6-14,assets/bases/maintenance-tunnel.webp,pod|box,狭小通路|安定電源
-freight,東貨物環状区|第三区物流層|旧企業倉庫街,貨物仕分け室|冷却倉庫跡|荷役制御室,8-10,6-8,5200-8200,16-28,assets/bases/freight-chamber.webp,pod|box,中規模農場|搬入口あり|電力容量良好
-station,廃都心線|旧中央交通層|封鎖地下鉄網,廃駅プラットフォーム|車両整備庫|地下コンコース,11-13,8-10,9200-14000,32-52,assets/bases/abandoned-station.webp,pod|box,大規模農場|高維持費|大電力幹線
+drainage,第17排水層|旧排水ブロック|下層廃液区,小型排水室|廃ポンプ室|湿道設備庫,5-6,2-3,850-1600,3-7,assets/bases/drainage-room.webp,pod|box,低天井|小規模栽培|隠蔽性
+tunnel,北部保安通路|環状小管区|旧通信管路,保安待機室|機材待機室|地下作業室,6-8,3-4,2200-3800,7-14,assets/bases/maintenance-tunnel.webp,pod|box,細長区画|安定電源|通路型
+freight,東貨物環状区|第三物流層|旧企業倉庫街,貨物仕分け室|冷却倉庫跡|荷役制御室,7-8,5-6,4400-6800,14-24,assets/bases/freight-chamber.webp,pod|box,中規模農場|搬入口あり|電力余裕
+station,廃都心線旧中央交通層|第二地下延網|忘れられた駅区,廃プラットフォーム|車両整備庫|地下コンコース,8-8,7-8,7200-9800,24-38,assets/bases/abandoned-station.webp,pod|box,大規模栽培|高維持費|広域配線

@@ -39,16 +39,16 @@ comms_next,,,次へ
 comms_close,,,閉じる
 comms_close_aria,#comms-close,aria-label,通信を閉じる
 favicon,"link[rel='icon']",href,assets/icons/seed.webp
-player_portrait,.player-profile img,src,assets/characters/protagonist.webp
+player_portrait,.player-profile img,src,assets/characters/protagonist.png
 player_portrait_alt,.player-profile img,alt,主人公
 resource_credit_icon,.resource-card.credit .resource-image,src,assets/icons/credit.webp
 resource_water_icon,#water-card .resource-image,src,assets/icons/water.webp
 resource_nutrient_icon,#nutrient-card .resource-image,src,assets/icons/nutrient.webp
 resource_capacity_icon,.resource-strip .resource-card:nth-child(5) .resource-image,src,assets/icons/shelf.webp
-seed_broker_portrait,.broker-panel img,src,assets/characters/seed-broker.webp
+seed_broker_portrait,.broker-panel img,src,assets/characters/seed-broker.png
 seed_broker_portrait_alt,.broker-panel img,alt,種ブローカーのマラ
 property_broker_portrait,.property-contact img,src,assets/characters/property-broker-black.png
 property_broker_portrait_alt,.property-contact img,alt,不動産ブローカー
-comms_default_icon,#comms-icon,src,assets/characters/seed-broker.webp
+comms_default_icon,#comms-icon,src,assets/characters/seed-broker.png
 comms_fallback_icon,,,assets/icons/credit.webp
 procurement_refresh_icon,,,assets/icons/seed.webp

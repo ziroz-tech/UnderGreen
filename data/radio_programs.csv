@@ -1,0 +1,6 @@
+id,name,kicker,description,file,volume,unlocked
+off,OFF,SIGNAL CLOSED,ラジオを停止します。,none,0,true
+market_watch,Market Watch,LOWNET MARKET,市場の噂と価格のざわめきを流す仮番組。,assets/audio/ambient/market-radio.wav,0.22,true
+maintenance_line,Maintenance Line,UTILITY BAND,保守作業員向けの通信帯を流す仮番組。,assets/audio/ambient/maintenance-radio.wav,0.20,true
+ghost_channel,Ghost Channel,NO LICENSE,不明瞭な搬送波だけが残る仮チャンネル。,assets/audio/ambient/silent-carrier.wav,0.16,true
+coffee_channel,深夜の珈琲ラジオ,public broadcasting,管理局のAIによるラジオ番組,assets/audio/ambient/coffee.aac,0.16,true

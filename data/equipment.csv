@@ -8,3 +8,4 @@ fan,区画循環ファン,assets/icons/fan.webp,assets/equipment/fan-iso-tall-v2
 tank,養液タンク,assets/icons/tank.webp,,250,#91d9ff,養液の最大備蓄量を30増加。
 filter,水フィルター,assets/icons/filter.webp,,500,#48dbea,水の購入価格を25%削減。効果は永続。
 fridge,冷蔵保管箱,assets/icons/fridge.webp,,400,#b5d5ff,収穫物が劣化するまでの日数を3日から6日に延長。
+support_robot,サポートロボット,assets/icons/supportRobot.webp,assets/characters/supportRobot-iso-leftdown.png,0,#48dbea,追加OSが必要な補助ロボット。今は見守っているだけ。
