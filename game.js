@@ -37,6 +37,15 @@ const LEGACY_SAVE_KEYS = Array.from({ length: 15 }, (_, index) => `undergreen-sa
 const DAY30_RECORDS_KEY = "undergreen-day30-records-v1";
 const FREE_RECORDS_KEY = "undergreen-free-records-v1";
 const START_MODE_PREF_KEY = "undergreen-start-mode-view-v1";
+const PUBLIC_GAME_URL = "https://ziroz-tech.github.io/UnderGreen/";
+const GOOGLE_FORM_PREFILL_URL = "https://docs.google.com/forms/d/1DhYFy45WvRujbb3CzGxlMpZXWnAe5eZFt62CczIPxqk/viewform?usp=pp_url";
+const GOOGLE_FORM_FIELDS = {
+  recordJson: "entry.1523070449",
+  day30Count: "",
+  freeCount: "",
+  latestRevenue: "",
+  latestTitles: ""
+};
 const PROPERTY_REROLL_FEE = 100;
 const PROCUREMENT_REROLL_FEE = 80;
 const PROPERTY_LISTING_COUNT = 4;
@@ -84,9 +93,11 @@ let pendingComms = [];
 let startScreenOpen = true;
 let pendingConfirmAction = null;
 let pendingDangerAction = null;
+let pendingExtraAction = null;
 let pausedBeforeStartScreen = false;
 let pendingDay30RecordId = null;
 let startModeView = "day30";
+const COMMS_DEDUPE_TRIGGERS = new Set(["plant_resource_shortage", "resource_low"]);
 
 function parseCsv(text) {
   const rows = [];
@@ -2539,9 +2550,30 @@ function formatCommsText(template = "", context = {}) {
   });
 }
 
+function commsDedupeContextKey(trigger, context = {}) {
+  if (trigger === "resource_low") return String(context.resource || "resource");
+  if (trigger === "plant_resource_shortage") return plantingShortageReason(context);
+  return "";
+}
+
+function commsDedupeKey(entry) {
+  const trigger = entry?.event?.trigger || "";
+  if (!COMMS_DEDUPE_TRIGGERS.has(trigger)) return "";
+  return trigger + ":" + commsDedupeContextKey(trigger, entry.context || {});
+}
+
+function hasMatchingQueuedComms(event, context = {}) {
+  if (!COMMS_DEDUPE_TRIGGERS.has(event?.trigger)) return false;
+  const key = commsDedupeKey({ event, context });
+  if (!key) return false;
+  return [activeComms, ...pendingComms].some((entry) => commsDedupeKey(entry) === key);
+}
+
 function triggerComms(trigger, context = {}) {
   if (!state || state.ended) return;
-  const events = COMM_EVENTS.filter((entry) => commsEventMatches(entry, trigger, context));
+  const events = COMM_EVENTS
+    .filter((entry) => commsEventMatches(entry, trigger, context))
+    .filter((event) => !hasMatchingQueuedComms(event, context));
   if (!events.length) {
     if (activeComms) renderComms();
     return;
@@ -2582,6 +2614,7 @@ function restoreCommsState() {
       .filter((event) => event.blocking && state.commsSeen?.[event.id] && !state.commsChoices?.[event.id])
       .map((event) => ({ id: event.id, page: 0, context: {} }));
   }
+  const restoredDedupeKeys = new Set();
   const restored = sourceEntries.map((entry) => {
     const event = COMM_EVENTS.find((candidate) => candidate.id === entry.id);
     if (!event) return null;
@@ -2591,7 +2624,13 @@ function restoreCommsState() {
       page: Math.max(0, Math.min(Number(entry.page) || 0, maxPage)),
       context: entry.context || {}
     };
-  }).filter(Boolean).filter(commsEntryStillValid);
+  }).filter(Boolean).filter(commsEntryStillValid).filter((entry) => {
+    const key = commsDedupeKey(entry);
+    if (!key) return true;
+    if (restoredDedupeKeys.has(key)) return false;
+    restoredDedupeKeys.add(key);
+    return true;
+  });
   activeComms = restored.shift() || null;
   pendingComms = restored;
   persistCommsState();
@@ -4345,6 +4384,105 @@ function finalizeDay30Run({ completed = false, playedDays = state.day, mode = st
   render();
 }
 
+function randomResultTitle(summary) {
+  const titles = Array.isArray(summary?.titles) ? summary.titles.filter(Boolean) : [];
+  if (!titles.length) return "\u9055\u6cd5\u30ec\u30bf\u30b9\u8fb2\u5bb6";
+  return titles[Math.floor(Math.random() * titles.length)];
+}
+
+function publicGameUrl() {
+  const host = window.location.hostname;
+  if (!host || host === "127.0.0.1" || host === "localhost") return PUBLIC_GAME_URL;
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.pathname = url.pathname.replace(/index\.html$/i, "");
+  return url.href;
+}
+
+function currentDay30Record() {
+  if (!pendingDay30RecordId) return null;
+  for (const mode of ["day30", "free"]) {
+    const record = readPlayRecords(mode).find((entry) => entry.id === pendingDay30RecordId);
+    if (record) return record;
+  }
+  return null;
+}
+
+function currentResultSummary() {
+  applyDay30PlayerName();
+  return currentDay30Record() || createDay30Summary({
+    id: pendingDay30RecordId || undefined,
+    mode: state.mode || "day30",
+    completed: state.ended,
+    playedDays: state.mode === "day30" ? Math.min(30, state.day) : state.day,
+    playerName: currentDay30PlayerName()
+  });
+}
+
+function xShareDraft(summary) {
+  const title = randomResultTitle(summary);
+  return "\u3042\u306a\u305f\u306f\u9055\u6cd5\u30ec\u30bf\u30b9\u3092\u58f2\u3063\u3066\u3001"
+    + formatNumber(summary.revenue || 0)
+    + "\u5186\u7a3c\u304e\u3001"
+    + title
+    + "\u3068\u547c\u3070\u308c\u307e\u3057\u305f\u3002\n#UnderGreen #\u9055\u6cd5\u30ec\u30bf\u30b9\u683d\u57f9\n"
+    + publicGameUrl();
+}
+
+function openXShareDraft() {
+  const summary = currentResultSummary();
+  const textValue = xShareDraft(summary);
+  legacyCopyToClipboard(textValue);
+  window.open("https://twitter.com/intent/tweet?text=" + encodeURIComponent(textValue), "_blank", "noopener,noreferrer");
+  toast("X post draft opened.");
+}
+
+function latestPlayRecordForExport() {
+  return [...readDay30Records(), ...readFreeRecords()]
+    .sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")))[0] || null;
+}
+
+function googleFormExportPayload() {
+  const records = playRecordsExportPayload();
+  const latest = latestPlayRecordForExport();
+  return {
+    recordJson: JSON.stringify(records),
+    day30Count: String(records.records.day30.length),
+    freeCount: String(records.records.free.length),
+    latestRevenue: latest ? String(latest.revenue || 0) : "0",
+    latestTitles: latest?.titles?.join(" / ") || ""
+  };
+}
+
+function googleFormConfigured() {
+  return Boolean(GOOGLE_FORM_PREFILL_URL && Object.values(GOOGLE_FORM_FIELDS).some(Boolean));
+}
+
+function googleFormPrefillUrl() {
+  const url = new URL(GOOGLE_FORM_PREFILL_URL);
+  const payload = googleFormExportPayload();
+  Object.entries(GOOGLE_FORM_FIELDS).forEach(([key, entryId]) => {
+    if (!entryId || payload[key] === undefined) return;
+    url.searchParams.set(entryId, payload[key]);
+  });
+  return url.href;
+}
+
+function openGoogleFormRecordExport() {
+  const payload = googleFormExportPayload();
+  if (!googleFormConfigured()) {
+    showModal("FORM SETUP", "Google Form setting required", `<p class="modal-copy">Set GOOGLE_FORM_PREFILL_URL and GOOGLE_FORM_FIELDS in game.js. The payload below is what will be sent.</p><textarea class="record-export-field" readonly>${escapeHtml(JSON.stringify(payload, null, 2))}</textarea>`, true);
+    document.getElementById("modal-reset").style.display = "none";
+    window.setTimeout(() => {
+      const field = document.querySelector(".record-export-field");
+      if (field) field.select();
+    }, 0);
+    return;
+  }
+  window.open(googleFormPrefillUrl(), "_blank", "noopener,noreferrer");
+  toast("Google Form opened.");
+}
 function day30ReportMarkup(summary) {
   const status = summary.completed ? "完走" : "途中終了";
   return `<p class="modal-copy">DAY30モードの記録を保存しました。名前はこの端末の記録一覧に表示されます。</p>
@@ -4361,6 +4499,9 @@ function day30ReportMarkup(summary) {
     <div><span>最多市場(量)</span><strong>${marketLabel(summary.topMarketQtyId)} x${summary.topMarketQty || 0}</strong></div>
   </div>
   <p class="modal-copy">称号: ${summary.titles.length ? summary.titles.join(" / ") : "なし"}</p>
+  <div class="day30-share-actions">
+    <button class="secondary-button" data-day30-result="share-x">X POST DRAFT</button>
+  </div>
   <div class="day30-result-actions">
     <button class="secondary-button" data-day30-result="start">スタートへ戻る</button>
     <button class="primary-button" data-day30-result="view">閲覧モード</button>
@@ -4571,12 +4712,15 @@ function renderDay30Records() {
 function openConfirmWidget({ kicker = "CONFIRM", title, copy, confirmText = "実行", onConfirm }) {
   pendingConfirmAction = onConfirm;
   pendingDangerAction = null;
+  pendingExtraAction = null;
   document.getElementById("confirm-kicker").textContent = kicker;
   document.getElementById("confirm-title").textContent = title;
   document.getElementById("confirm-copy").textContent = copy;
   document.getElementById("confirm-ok").textContent = confirmText;
   const dangerButton = document.getElementById("confirm-danger");
   if (dangerButton) dangerButton.classList.add("hidden");
+  const extraButton = document.getElementById("confirm-extra");
+  if (extraButton) extraButton.classList.add("hidden");
   const widget = document.getElementById("confirm-widget");
   widget.classList.remove("hidden");
   widget.setAttribute("aria-hidden", "false");
@@ -4585,7 +4729,9 @@ function openConfirmWidget({ kicker = "CONFIRM", title, copy, confirmText = "実
 function closeConfirmWidget() {
   pendingConfirmAction = null;
   pendingDangerAction = null;
+  pendingExtraAction = null;
   document.getElementById("confirm-danger")?.classList.add("hidden");
+  document.getElementById("confirm-extra")?.classList.add("hidden");
   const widget = document.getElementById("confirm-widget");
   widget.classList.add("hidden");
   widget.setAttribute("aria-hidden", "true");
@@ -4599,6 +4745,12 @@ function confirmWidgetAction() {
 
 function confirmWidgetDangerAction() {
   const action = pendingDangerAction;
+  closeConfirmWidget();
+  if (action) action();
+}
+
+function confirmWidgetExtraAction() {
+  const action = pendingExtraAction;
   closeConfirmWidget();
   if (action) action();
 }
@@ -4744,6 +4896,12 @@ function requestRecordExport() {
   if (dangerButton) {
     dangerButton.textContent = "記録消去";
     dangerButton.classList.remove("hidden");
+  }
+  pendingExtraAction = openGoogleFormRecordExport;
+  const extraButton = document.getElementById("confirm-extra");
+  if (extraButton) {
+    extraButton.textContent = "GOOGLE FORM";
+    extraButton.classList.remove("hidden");
   }
 }
 
@@ -5390,6 +5548,7 @@ function bindEvents() {
       event.preventDefault();
       if (day30ResultAction.dataset.day30Result === "start") day30ResultToStart();
       if (day30ResultAction.dataset.day30Result === "view") enterDay30ViewMode();
+      if (day30ResultAction.dataset.day30Result === "share-x") openXShareDraft();
       return;
     }
 
@@ -5959,6 +6118,7 @@ function bindEvents() {
   document.getElementById("confirm-cancel").addEventListener("click", closeConfirmWidget);
   document.getElementById("confirm-ok").addEventListener("click", confirmWidgetAction);
   document.getElementById("confirm-danger").addEventListener("click", confirmWidgetDangerAction);
+  document.getElementById("confirm-extra").addEventListener("click", confirmWidgetExtraAction);
   document.getElementById("modal-close").addEventListener("click", () => {
     document.getElementById("modal-backdrop").classList.add("hidden");
   });
