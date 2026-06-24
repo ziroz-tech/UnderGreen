@@ -16,6 +16,9 @@ let EVENTS = [];
 let QUIET_NEWS = [];
 let EQUIPMENT = {};
 let SOUND_FILES = {};
+let SOUND_VOLUMES = {};
+let AMBIENT_LAYERS = {};
+let RADIO_PROGRAMS = {};
 let UNLOCK_RULES = [];
 
 const QUALITY = {
@@ -36,6 +39,8 @@ const FREE_RECORDS_KEY = "undergreen-free-records-v1";
 const START_MODE_PREF_KEY = "undergreen-start-mode-view-v1";
 const PROPERTY_REROLL_FEE = 100;
 const PROCUREMENT_REROLL_FEE = 80;
+const PROPERTY_LISTING_COUNT = 4;
+const SAFE_ROOM_IMAGE = "assets/bases/safe-room.png";
 const DEFAULT_ENVIRONMENT = { temp: 24, humidity: 60, co2: 700 };
 const ISO_TILE_WIDTH = 96;
 const ISO_TILE_HEIGHT = 48;
@@ -164,6 +169,39 @@ function parseRequirement(entry) {
 
 function toRequirements(value) {
   return toList(value).map(parseRequirement).filter(Boolean);
+}
+
+function parseContextMatcher(entry) {
+  const match = String(entry).match(/^([^!=]+)(!?=)(.*)$/);
+  if (!match) return null;
+  return {
+    key: match[1].trim(),
+    operator: match[2],
+    value: match[3].trim()
+  };
+}
+
+function toContextMatchers(value) {
+  return toList(value).map(parseContextMatcher).filter(Boolean);
+}
+
+function parseCommsEffect(entry) {
+  const raw = String(entry || "").trim();
+  if (!raw) return null;
+  const [conditionPart, actionPart = conditionPart] = raw.includes("->")
+    ? raw.split("->").map((part) => part.trim())
+    : ["choice:*", raw];
+  let choice = "*";
+  if (conditionPart && conditionPart !== "always") {
+    const [kind, value] = conditionPart.split(":").map((part) => part.trim());
+    if (kind === "choice") choice = value || "*";
+  }
+  const [action, value = ""] = actionPart.split(":").map((part) => part.trim());
+  return action ? { choice, action, value } : null;
+}
+
+function toCommsEffects(value) {
+  return toList(value).map(parseCommsEffect).filter(Boolean);
 }
 
 function rowsToObject(rows, mapper) {
@@ -353,6 +391,26 @@ async function loadExternalData() {
   });
   await loadRequiredCsv("data/audio.csv", (rows) => {
     SOUND_FILES = rowsToObject(rows, (row) => row.file);
+    SOUND_VOLUMES = rowsToObject(rows, (row) => toNumber(row.volume, 0.28));
+  });
+  await loadRequiredCsv("data/ambient_layers.csv", (rows) => {
+    AMBIENT_LAYERS = rowsToObject(rows, (row) => ({
+      label: row.label,
+      file: row.file,
+      volume: toNumber(row.volume, 0.15),
+      condition: row.condition || "always",
+      description: row.description
+    }));
+  });
+  await loadRequiredCsv("data/radio_programs.csv", (rows) => {
+    RADIO_PROGRAMS = rowsToObject(rows, (row) => ({
+      name: row.name,
+      kicker: row.kicker,
+      description: row.description,
+      file: row.file,
+      volume: toNumber(row.volume, 0.2),
+      unlocked: row.unlocked !== "false"
+    }));
   });
   await loadRequiredCsv("data/comm_events.csv", (rows) => {
     COMM_EVENTS = rows.map((row) => ({
@@ -368,12 +426,97 @@ async function loadExternalData() {
         const [id, label] = entry.split("=");
         return { id, label: label || id };
       }),
-      once: row.once !== "false",
+      once: String(row.once || "").trim().toLowerCase() !== "false",
       blocking: toBool(row.blocking),
-      priority: toNumber(row.priority, 0)
+      priority: toNumber(row.priority, 0),
+      requirements: toRequirements(row.requirements),
+      context: toContextMatchers(row.context),
+      sound: row.sound || "",
+      soundVolume: row.soundVolume ? toNumber(row.soundVolume, null) : null,
+      effects: toCommsEffects(row.effects)
     })).sort((a, b) => b.priority - a.priority);
   });
   await loadRequiredCsv("data/ui_text.csv", applyUiText);
+}
+
+function setBootLoadingProgress(done, total, label = "素材を読み込んでいます...") {
+  const overlay = document.getElementById("boot-loading");
+  if (!overlay) return;
+  const ratio = total ? Math.round((done / total) * 100) : 0;
+  const fill = document.getElementById("boot-loading-fill");
+  const textNode = document.getElementById("boot-loading-text");
+  const count = document.getElementById("boot-loading-count");
+  if (fill) fill.style.width = `${Math.max(0, Math.min(100, ratio))}%`;
+  if (textNode) textNode.textContent = label;
+  if (count) count.textContent = total ? `${done} / ${total} // ${ratio}%` : "0%";
+}
+
+function hideBootLoading() {
+  const overlay = document.getElementById("boot-loading");
+  if (!overlay) return;
+  overlay.classList.add("hidden");
+  window.setTimeout(() => overlay.remove(), 420);
+}
+
+function addAssetUrl(set, value) {
+  const url = String(value || "").trim();
+  if (!url || url.startsWith("#") || url.startsWith("data:")) return;
+  if (!/\.(png|jpe?g|webp|gif|svg|ico)(\?|#|$)/i.test(url)) return;
+  set.add(url);
+}
+
+function collectBootImageAssets() {
+  const urls = new Set();
+  document.querySelectorAll("img[src], link[rel='icon'][href]").forEach((element) => {
+    addAssetUrl(urls, element.getAttribute("src") || element.getAttribute("href"));
+  });
+  [SAFE_ROOM_IMAGE].forEach((url) => addAssetUrl(urls, url));
+  Object.values(CROPS).forEach((entry) => addAssetUrl(urls, entry.icon));
+  Object.values(MARKETS).forEach((entry) => addAssetUrl(urls, entry.portrait));
+  Object.values(GROW_UNITS).forEach((entry) => {
+    addAssetUrl(urls, entry.icon);
+    addAssetUrl(urls, entry.sprite);
+    addAssetUrl(urls, entry.emptySprite);
+  });
+  Object.values(FLOOR_DEVICES).forEach((entry) => {
+    addAssetUrl(urls, entry.icon);
+    addAssetUrl(urls, entry.sprite);
+  });
+  Object.values(EQUIPMENT).forEach((entry) => {
+    addAssetUrl(urls, entry.icon);
+    addAssetUrl(urls, entry.sprite);
+  });
+  Object.values(AREA_PROFILES).forEach((entry) => addAssetUrl(urls, entry.image));
+  Object.values(PLANT_STAGE_SPRITES).flat().forEach((url) => addAssetUrl(urls, url));
+  COMM_EVENTS.forEach((event) => addAssetUrl(urls, event.icon));
+  Object.values(UI_TEXT).forEach((value) => addAssetUrl(urls, value));
+  return [...urls];
+}
+
+function preloadImageAsset(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = async () => {
+      try {
+        if (image.decode) await image.decode();
+      } catch (error) {}
+      resolve(url);
+    };
+    image.onerror = () => reject(new Error(`Image failed to load: ${url}`));
+    image.src = url;
+  });
+}
+
+async function preloadBootAssets() {
+  const urls = collectBootImageAssets();
+  let done = 0;
+  setBootLoadingProgress(done, urls.length, "画像素材を読み込んでいます...");
+  for (const url of urls) {
+    await preloadImageAsset(url);
+    done += 1;
+    setBootLoadingProgress(done, urls.length, `画像素材を読み込んでいます... ${url}`);
+  }
 }
 
 function applyUiText(rows) {
@@ -403,8 +546,297 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+
+function defaultAnalytics() {
+  return {
+    startedAt: Date.now(),
+    timeline: {},
+    purchaseOrder: [],
+    recentFailures: [],
+    plantingFailures: {},
+    plants: {
+      plantedByCrop: {},
+      plantedByUnit: {},
+      readyByCrop: {},
+      harvestByCrop: {},
+      harvestByUnit: {},
+      harvestByQuality: {},
+      degradedHarvests: 0,
+      deaths: 0,
+      deadRemoved: 0,
+      harvestDelayTotalSec: 0,
+      harvestDelayCount: 0,
+      maxHarvestDelaySec: 0
+    },
+    sales: {
+      saleCount: 0,
+      byCropMarket: {},
+      byQuality: {},
+      premiumSales: 0,
+      bestMarketMisses: 0,
+      estimatedRevenueLoss: 0
+    },
+    resources: {
+      waterUsed: 0,
+      nutrientUsed: 0,
+      waterUsedOnPlanting: 0,
+      nutrientUsedOnPlanting: 0,
+      waterUsedWhileGrowing: 0,
+      nutrientUsedWhileGrowing: 0
+    },
+    tabs: {},
+    equipment: {
+      placements: 0,
+      stocked: 0,
+      sold: 0
+    }
+  };
+}
+
+function ensureAnalytics() {
+  if (!state) return null;
+  const defaults = defaultAnalytics();
+  state.analytics = { ...defaults, ...(state.analytics || {}) };
+  state.analytics.timeline ||= {};
+  state.analytics.purchaseOrder = Array.isArray(state.analytics.purchaseOrder) ? state.analytics.purchaseOrder : [];
+  state.analytics.recentFailures = Array.isArray(state.analytics.recentFailures) ? state.analytics.recentFailures : [];
+  state.analytics.plantingFailures ||= {};
+  state.analytics.plants = { ...defaults.plants, ...(state.analytics.plants || {}) };
+  state.analytics.plants.plantedByCrop ||= {};
+  state.analytics.plants.plantedByUnit ||= {};
+  state.analytics.plants.readyByCrop ||= {};
+  state.analytics.plants.harvestByCrop ||= {};
+  state.analytics.plants.harvestByUnit ||= {};
+  state.analytics.plants.harvestByQuality ||= {};
+  state.analytics.sales = { ...defaults.sales, ...(state.analytics.sales || {}) };
+  state.analytics.sales.byCropMarket ||= {};
+  state.analytics.sales.byQuality ||= {};
+  state.analytics.resources = { ...defaults.resources, ...(state.analytics.resources || {}) };
+  state.analytics.tabs ||= {};
+  state.analytics.equipment = { ...defaults.equipment, ...(state.analytics.equipment || {}) };
+  if (!Number.isFinite(Number(state.analytics.startedAt))) state.analytics.startedAt = Date.now();
+  return state.analytics;
+}
+
+function incrementMetric(record, key, amount = 1) {
+  if (!record || !key) return;
+  record[key] = Math.round((Number(record[key]) || 0) + amount);
+}
+
+function addMetric(record, key, amount = 0) {
+  if (!record || !key) return;
+  record[key] = Math.round((Number(record[key]) || 0) + amount);
+}
+
+function analyticsElapsedSeconds() {
+  const analytics = ensureAnalytics();
+  if (!analytics) return 0;
+  return Math.max(0, Math.round((Date.now() - analytics.startedAt) / 1000));
+}
+
+function analyticsDayFloat() {
+  return Number(((Number(state?.day) || 1) + (Number(state?.dayProgress) || 0)).toFixed(2));
+}
+
+function analyticsStamp(extra = {}) {
+  return {
+    day: Number(state?.day) || 1,
+    dayFloat: analyticsDayFloat(),
+    elapsedSec: analyticsElapsedSeconds(),
+    ...extra
+  };
+}
+
+function pushCapped(list, entry, limit = 120) {
+  list.push(entry);
+  if (list.length > limit) list.splice(0, list.length - limit);
+}
+
+function trackTimeline(key, context = {}) {
+  const analytics = ensureAnalytics();
+  if (!analytics || analytics.timeline[key]) return;
+  analytics.timeline[key] = analyticsStamp(context);
+}
+
+function trackPurchase(kind, itemId, price = 0, extra = {}) {
+  const analytics = ensureAnalytics();
+  if (!analytics) return;
+  const entry = analyticsStamp({ kind, itemId, price: Math.round(Number(price) || 0), ...extra });
+  pushCapped(analytics.purchaseOrder, entry, 200);
+  trackTimeline('firstPurchase', entry);
+  trackTimeline('firstPurchase:' + kind, entry);
+  if (itemId) trackTimeline('firstPurchase:' + kind + ':' + itemId, entry);
+}
+
+function plantingShortageReason(context = {}) {
+  const waterMissing = Number(context.waterMissing) > 0;
+  const nutrientMissing = Number(context.nutrientMissing) > 0;
+  if (waterMissing && nutrientMissing) return 'water_and_nutrient';
+  if (waterMissing) return 'water';
+  if (nutrientMissing) return 'nutrient';
+  return 'resource';
+}
+
+function trackPlantingFailure(reason, context = {}) {
+  const analytics = ensureAnalytics();
+  if (!analytics) return;
+  incrementMetric(analytics.plantingFailures, reason || 'unknown');
+  pushCapped(analytics.recentFailures, analyticsStamp({ type: 'planting', reason: reason || 'unknown', ...context }), 80);
+}
+
+function trackPlanting(cropId, unit, shelfIndex, slotIndex, plantingCost = {}) {
+  const analytics = ensureAnalytics();
+  if (!analytics) return;
+  incrementMetric(analytics.plants.plantedByCrop, cropId);
+  incrementMetric(analytics.plants.plantedByUnit, unit?.type || 'unknown');
+  const water = Number(plantingCost.water) || 0;
+  const nutrient = Number(plantingCost.nutrient) || 0;
+  addMetric(analytics.resources, 'waterUsed', water);
+  addMetric(analytics.resources, 'nutrientUsed', nutrient);
+  addMetric(analytics.resources, 'waterUsedOnPlanting', water);
+  addMetric(analytics.resources, 'nutrientUsedOnPlanting', nutrient);
+  trackTimeline('firstPlant', { cropId, unitType: unit?.type, shelfIndex, slotIndex });
+  trackTimeline('firstPlant:' + cropId, { cropId, unitType: unit?.type, shelfIndex, slotIndex });
+  trackTimeline('firstPlantUnit:' + (unit?.type || 'unknown'), { cropId, unitType: unit?.type, shelfIndex, slotIndex });
+}
+
+function trackPlantReady(plant, shelf) {
+  const analytics = ensureAnalytics();
+  if (!analytics || !plant || plant.readyTracked) return;
+  plant.readyTracked = true;
+  plant.readyAtElapsedSec = analyticsElapsedSeconds();
+  plant.readyAtDayFloat = analyticsDayFloat();
+  incrementMetric(analytics.plants.readyByCrop, plant.crop);
+  trackTimeline('firstReady', { cropId: plant.crop, unitType: shelf?.type });
+  trackTimeline('firstReady:' + plant.crop, { cropId: plant.crop, unitType: shelf?.type });
+}
+
+function trackHarvestAnalytics(plant, shelf, qty = 1) {
+  const analytics = ensureAnalytics();
+  if (!analytics || !plant) return;
+  const amount = Math.max(1, Number(qty) || 1);
+  incrementMetric(analytics.plants.harvestByCrop, plant.crop, amount);
+  incrementMetric(analytics.plants.harvestByUnit, shelf?.type || 'unknown', amount);
+  incrementMetric(analytics.plants.harvestByQuality, plant.quality || 'unknown', amount);
+  if (plant.degraded) analytics.plants.degradedHarvests += amount;
+  if (Number.isFinite(Number(plant.readyAtElapsedSec))) {
+    const delay = Math.max(0, analyticsElapsedSeconds() - Number(plant.readyAtElapsedSec));
+    analytics.plants.harvestDelayTotalSec += delay * amount;
+    analytics.plants.harvestDelayCount += amount;
+    analytics.plants.maxHarvestDelaySec = Math.max(Number(analytics.plants.maxHarvestDelaySec) || 0, delay);
+  }
+  trackTimeline('firstHarvest', { cropId: plant.crop, unitType: shelf?.type, quality: plant.quality });
+  trackTimeline('firstHarvest:' + plant.crop, { cropId: plant.crop, unitType: shelf?.type, quality: plant.quality });
+}
+
+function trackDeadPlantAnalytics(plant, shelf, reason = 'dead') {
+  const analytics = ensureAnalytics();
+  if (!analytics || !plant) return;
+  if (reason === 'removed') {
+    analytics.plants.deadRemoved += 1;
+    return;
+  }
+  if (plant.deadTracked) return;
+  plant.deadTracked = true;
+  analytics.plants.deaths += 1;
+  pushCapped(analytics.recentFailures, analyticsStamp({ type: 'plant_dead', reason, cropId: plant.crop, unitType: shelf?.type }), 80);
+}
+
+function trackSaleAnalytics(batch, marketId, qty, unitPrice, revenue, premiumSale = false) {
+  const analytics = ensureAnalytics();
+  if (!analytics || !batch) return;
+  const amount = Math.max(1, Number(qty) || 1);
+  analytics.sales.saleCount += 1;
+  incrementMetric(analytics.sales.byQuality, batch.quality || 'unknown', amount);
+  if (premiumSale) analytics.sales.premiumSales += amount;
+  const key = batch.crop + ':' + marketId;
+  const entry = analytics.sales.byCropMarket[key] || { cropId: batch.crop, marketId, qty: 0, revenue: 0 };
+  entry.qty += amount;
+  entry.revenue += Math.round(Number(revenue) || 0);
+  analytics.sales.byCropMarket[key] = entry;
+  const acceptedMarkets = Object.keys(MARKETS).filter((candidate) => isMarketAvailable(candidate) && MARKETS[candidate]?.accepts?.includes(batch.crop));
+  const best = acceptedMarkets
+    .map((candidate) => ({ marketId: candidate, price: getUnitPrice(batch, candidate) }))
+    .sort((a, b) => b.price - a.price)[0];
+  if (best && best.marketId !== marketId && best.price > unitPrice) {
+    analytics.sales.bestMarketMisses += 1;
+    analytics.sales.estimatedRevenueLoss += Math.round((best.price - unitPrice) * amount);
+  }
+  trackTimeline('firstSale', { cropId: batch.crop, marketId, qty: amount, revenue: Math.round(Number(revenue) || 0) });
+  trackTimeline('firstSaleMarket:' + marketId, { cropId: batch.crop, marketId, qty: amount, revenue: Math.round(Number(revenue) || 0) });
+}
+
+function trackTabAnalytics(tabId, previousTab = '') {
+  const analytics = ensureAnalytics();
+  if (!analytics || !tabId) return;
+  incrementMetric(analytics.tabs, tabId);
+  trackTimeline('firstTab:' + tabId, { tabId, previousTab });
+}
+
+function trackResourceGrowthUse(water = 0, nutrient = 0) {
+  const analytics = ensureAnalytics();
+  if (!analytics) return;
+  addMetric(analytics.resources, 'waterUsed', water);
+  addMetric(analytics.resources, 'nutrientUsed', nutrient);
+  addMetric(analytics.resources, 'waterUsedWhileGrowing', water);
+  addMetric(analytics.resources, 'nutrientUsedWhileGrowing', nutrient);
+}
+
+function trackPlacementAnalytics(kind, item) {
+  const analytics = ensureAnalytics();
+  if (!analytics || !item) return;
+  analytics.equipment.placements += 1;
+  trackTimeline('firstPlaced:' + kind + ':' + item.type, { kind, itemId: item.type, x: item.x, y: item.y });
+}
+
+function trackStockAnalytics(kind, item) {
+  const analytics = ensureAnalytics();
+  if (!analytics || !item) return;
+  analytics.equipment.stocked += 1;
+}
+
+function trackEquipmentSaleAnalytics(kind, item, refund = 0) {
+  const analytics = ensureAnalytics();
+  if (!analytics || !item) return;
+  analytics.equipment.sold += 1;
+  pushCapped(analytics.purchaseOrder, analyticsStamp({ kind: 'sell_' + kind, itemId: item.type, price: -Math.round(Number(refund) || 0) }), 200);
+}
+
+function createAnalyticsSummary() {
+  const analytics = ensureAnalytics() || defaultAnalytics();
+  const plants = analytics.plants || {};
+  const totalSlots = allShelves().reduce((sum, shelf) => sum + (shelf.slots?.length || 0), 0);
+  const active = activePlants();
+  const plantedSlots = active.filter(({ plant }) => plant && !plant.dead).length;
+  const readySlots = active.filter(({ plant }) => plant?.ready).length;
+  const plantingFailureTotal = Object.values(analytics.plantingFailures || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+  return {
+    startedAt: analytics.startedAt,
+    elapsedSec: analyticsElapsedSeconds(),
+    timeline: analytics.timeline,
+    purchaseOrder: analytics.purchaseOrder,
+    recentFailures: analytics.recentFailures,
+    plantingFailures: analytics.plantingFailures,
+    plantingFailureTotal,
+    plants: {
+      ...plants,
+      averageHarvestDelaySec: plants.harvestDelayCount ? Math.round(plants.harvestDelayTotalSec / plants.harvestDelayCount) : 0
+    },
+    sales: analytics.sales,
+    resources: analytics.resources,
+    tabs: analytics.tabs,
+    equipment: analytics.equipment,
+    utilization: {
+      totalSlots,
+      plantedSlots,
+      readySlots,
+      occupancyRate: totalSlots ? Number((plantedSlots / totalSlots).toFixed(3)) : 0
+    }
+  };
+}
+
 function createInitialState(mode = "normal") {
-  const initialProperty = generateProperty("drainage", true);
+  const initialProperty = createInitialSafeRoom();
   initialProperty.ownedAt = Date.now();
   const initialPod = createStarterPod();
   return {
@@ -421,7 +853,7 @@ function createInitialState(mode = "normal") {
       floorDevices: []
     }],
     activeBaseId: initialProperty.id,
-    propertyListings: generatePropertyListings(5),
+    propertyListings: generatePropertyListings(PROPERTY_LISTING_COUNT),
     procurementTags: {},
     unlocks: {},
     inventory: [],
@@ -445,6 +877,7 @@ function createInitialState(mode = "normal") {
       foodToRebels: 0,
       weaponsToRebels: 0
     },
+    analytics: defaultAnalytics(),
     marketUnlocked: { lower: true, medical: false, upper: false, rebel: false },
     marketTabUnlocked: false,
     shopUnlocked: false,
@@ -452,16 +885,19 @@ function createInitialState(mode = "normal") {
     commsSeen: {},
     commsChoices: {},
     commsOpen: [],
-    endingOffers: {},
-    endingDeclined: {},
     event: null,
     news: "",
     newsLabel: "",
+    audio: {
+      noiseCanceling: false,
+      radioProgram: "off"
+    },
     day30Recorded: false,
     day30RecordId: null,
     consecutiveDebtDays: 0,
     tomatoHarvested: false,
     prototypeReportShown: false,
+    supportRobotGranted: false,
     ended: false,
     resultShown: false,
     log: text("log_initial", "System online. Place the grow pod Mara sent you.")
@@ -481,6 +917,38 @@ function createStarterPod() {
     dirt: 0,
     slots: Array(GROW_UNITS.pod.slots).fill(null)
   };
+}
+
+function createInitialSafeRoom() {
+  const drainageProfile = AREA_PROFILES.drainage || {};
+  const tags = ["humid"];
+  const tagEffects = combinedEffects(tags, BASE_TAGS);
+  const property = {
+    id: makeId("property"),
+    tier: "safe_room",
+    name: "下層貧民区のセーフルーム",
+    code: "SAFE-ROOM-01",
+    cols: 3,
+    rows: 2,
+    price: 0,
+    basePrice: 0,
+    onSale: false,
+    discountRate: 0,
+    blockedCells: [],
+    upkeep: 0,
+    image: SAFE_ROOM_IMAGE,
+    allowedUnits: ["pod"],
+    traits: ["初期拠点", "POD専用", "極小区画"],
+    tags,
+    environment: {
+      temp: DEFAULT_ENVIRONMENT.temp + (tagEffects.temp || 0),
+      humidity: DEFAULT_ENVIRONMENT.humidity + (tagEffects.humidity || 0),
+      co2: DEFAULT_ENVIRONMENT.co2 + (tagEffects.co2 || 0)
+    },
+    description: ""
+  };
+  property.description = propertyFlavorDescription(property);
+  return property;
 }
 
 function randomBetween(min, max) {
@@ -567,6 +1035,11 @@ function usableCellCount(base) {
 
 function propertyFlavorDescription(property, onSale = property.onSale) {
   const lines = {
+    safe_room: [
+      "Kido: A lower-district safe room. Tiny, quiet, and just wide enough to start.",
+      "Kido: Three by two. No comfort, no witnesses, enough floor for your first green.",
+      "Kido: Keep the PODs tight. Bigger rooms come after you prove the hands."
+    ],
     drainage: [
       "Kido: Low ceiling, good water noise. Fine for hiding your first green.",
       "Kido: Patrols look up. Down here, quiet hands live longer.",
@@ -638,8 +1111,8 @@ function generateProperty(tier = "drainage", initial = false) {
   return property;
 }
 
-function generatePropertyListings(count = 5) {
-  const tiers = ["drainage", "tunnel", "tunnel", "freight", "station"];
+function generatePropertyListings(count = PROPERTY_LISTING_COUNT) {
+  const tiers = ["drainage", "drainage", "tunnel", "freight", "station"];
   return Array.from({ length: count }, (_, index) => generateProperty(tiers[Math.min(index, tiers.length - 1)]));
 }
 
@@ -782,6 +1255,7 @@ function progressionValue(key) {
   if (key === "shopUnlocked") return state.shopUnlocked;
   if (key === "marketTabUnlocked") return state.marketTabUnlocked;
   if (key === "brokerUnlocked") return state.brokerUnlocked;
+  if (key === "timeUnlocked") return state.timeUnlocked;
   if (key === "revenue") return state.tradeStats?.revenue || 0;
   if (key === "unitsSold") return state.tradeStats?.unitsSold || 0;
   if (key === "money") return state.money || 0;
@@ -818,7 +1292,7 @@ function applyUnlock(rule) {
   if (rule.type === "market") state.marketUnlocked[rule.target] = true;
   if (rule.type === "broker") {
     state.brokerUnlocked = true;
-    if (!state.propertyListings?.length) state.propertyListings = generatePropertyListings(5);
+    if (!state.propertyListings?.length) state.propertyListings = generatePropertyListings(PROPERTY_LISTING_COUNT);
   }
   if (rule.type === "tab" && rule.target === "shop") state.shopUnlocked = true;
   if (rule.type === "tab" && rule.target === "market") state.marketTabUnlocked = true;
@@ -826,17 +1300,32 @@ function applyUnlock(rule) {
 
 function updateProgressionUnlocks({ silent = false } = {}) {
   state.unlocks ||= {};
-  const unlockedEvents = new Set();
+  const unlockedEvents = [];
+  const queuedEvents = new Set();
   UNLOCK_RULES.forEach((rule) => {
     if (state.unlocks[rule.id]) return;
     if (rule.initiallyUnlocked || requirementsMet(rule.requirements)) {
       applyUnlock(rule);
-      if (!silent && rule.event) unlockedEvents.add(rule.event);
+      if (!silent && rule.event && !queuedEvents.has(rule.event)) {
+        queuedEvents.add(rule.event);
+        unlockedEvents.push({
+          event: rule.event,
+          context: {
+            unlockId: rule.id,
+            unlockType: rule.type,
+            unlockTarget: rule.target,
+            target: rule.target,
+            marketId: rule.type === "market" ? rule.target : "",
+            itemId: ["shop_item", "seed_item"].includes(rule.type) ? rule.target : "",
+            cropId: rule.type === "seed_item" ? rule.target : ""
+          }
+        });
+      }
     }
   });
   if (!silent) {
-    unlockedEvents.forEach((event) => triggerComms(event));
-    if (unlockedEvents.size) playSound("alert", 0.18);
+    unlockedEvents.forEach(({ event, context }) => triggerComms(event, context));
+    if (unlockedEvents.length) playSound("unlock_notice", 0.18);
   }
 }
 
@@ -999,6 +1488,7 @@ function loadGame() {
   state.mode ||= "normal";
   state.day30Recorded = Boolean(state.day30Recorded);
   state.day30RecordId ||= null;
+  state.supportRobotGranted = Boolean(state.supportRobotGranted);
   state.tradeStats ||= { unitsSold: 0, revenue: 0, byMarket: { lower: 0, medical: 0, upper: 0, rebel: 0 }, byMarketQty: { lower: 0, medical: 0, upper: 0, rebel: 0 }, byCrop: {}, eventRevenue: 0, foodToRebels: 0, weaponsToRebels: 0 };
   state.tradeStats.byMarket ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
   state.tradeStats.byMarketQty ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
@@ -1008,8 +1498,14 @@ function loadGame() {
   });
   state.tradeStats.byCrop ||= {};
   state.tradeStats.eventRevenue ||= 0;
+  state.tradeStats.foodToRebels ||= 0;
+  state.tradeStats.weaponsToRebels ||= 0;
+  ensureAnalytics();
   state.marketFluctuation ||= {};
   state.marketSignals ||= {};
+  state.audio ||= {};
+  state.audio.noiseCanceling = Boolean(state.audio.noiseCanceling);
+  if (!RADIO_PROGRAMS[state.audio.radioProgram]) state.audio.radioProgram = "off";
   state.marketEventQueue = Array.isArray(state.marketEventQueue) ? state.marketEventQueue : [];
   state.newsHistory = Array.isArray(state.newsHistory) ? state.newsHistory : [];
   if (!Number.isFinite(Number(state.nextMarketForecastDay))) {
@@ -1025,6 +1521,7 @@ function loadGame() {
   }
   updateProgressionUnlocks({ silent: true });
   repairPlayableState();
+  ensureSupportRobotGrant();
   restoreCommsState();
   if (!isMarketAvailable(selectedMarket)) selectedMarket = "lower";
   const hasLegacyImmediateEvent = state.event && !state.marketEventQueue.length;
@@ -1039,6 +1536,7 @@ function makeId(prefix) {
 function normalizeBase(base) {
   base.shelves ||= [];
   base.floorDevices ||= [];
+  if (base.tier === "safe_room") base.image = SAFE_ROOM_IMAGE;
   base.allowedUnits = (base.allowedUnits || []).filter((unitId) => GROW_UNITS[unitId]);
   base.shelves = base.shelves.filter((unit) => GROW_UNITS[unit.type]);
   base.floorDevices = base.floorDevices.filter((device) => FLOOR_DEVICES[device.type]);
@@ -1057,7 +1555,7 @@ function normalizeBase(base) {
 function ownedBases() {
   state.bases ||= [];
   if (!state.bases.length) {
-    const fallback = state.property || generateProperty("drainage", true);
+    const fallback = state.property || createInitialSafeRoom();
     state.bases.push(normalizeBase({
       ...fallback,
       shelves: state.shelves || [],
@@ -1179,6 +1677,50 @@ function allPlacedObjects() {
   ];
 }
 
+function supportRobotExists() {
+  return ownedBases().some((base) => base.floorDevices?.some((device) => device.type === "support_robot"));
+}
+
+function preferredSupportRobotPosition(base, item) {
+  const candidates = [
+    { x: Math.min(base.cols - 1, 2), y: Math.min(base.rows - 1, 1) },
+    { x: Math.min(base.cols - 1, 2), y: 0 },
+    { x: Math.min(base.cols - 1, 1), y: Math.min(base.rows - 1, 1) },
+    { x: base.cols - 1, y: base.rows - 1 }
+  ];
+  for (const pos of candidates) {
+    if (pos.x >= 0 && pos.y >= 0 && canPlace(item, pos.x, pos.y, item.id)) return pos;
+  }
+  return firstAvailablePosition(item);
+}
+
+function hasCompletedCommsTrigger(trigger) {
+  return COMM_EVENTS.some((event) => event.trigger === trigger && state.commsChoices?.[event.id]);
+}
+
+function grantFloorDevice(type) {
+  if (!FLOOR_DEVICES[type]) return false;
+  if (type === "support_robot") {
+    if (supportRobotExists()) {
+      state.supportRobotGranted = true;
+      return false;
+    }
+    state.supportRobotGranted = true;
+  }
+  const device = { id: makeId("device"), type, placed: false, x: null, y: null, tags: unitTags(type), dirt: 0 };
+  currentFloorDevices().push(device);
+  const item = { ...device, kind: "device" };
+  const position = preferredSupportRobotPosition(currentBase(), item);
+  if (position) Object.assign(device, position, { placed: true });
+  selectedDeviceId = null;
+  placementSelection = null;
+  return true;
+}
+
+function ensureSupportRobotGrant() {
+  if (!state.supportRobotGranted && hasCompletedCommsTrigger("first_place") && grantFloorDevice("support_robot")) saveGame();
+}
+
 function footprint(item) {
   const definition = item.kind === "device" || FLOOR_DEVICES[item.type]
     ? FLOOR_DEVICES[item.type]
@@ -1195,7 +1737,6 @@ function equipmentVisualDepth(item, kind) {
 
 function canPlace(item, x, y, ignoreId = null) {
   const base = currentBase();
-  if (item.kind !== "device" && !base.allowedUnits.includes(item.type)) return false;
   const size = footprint(item);
   if (x < 0 || y < 0 || x + size.width > base.cols || y + size.height > base.rows) return false;
   for (let offsetY = 0; offsetY < size.height; offsetY += 1) {
@@ -1239,9 +1780,8 @@ function migrateLegacyPlacements() {
 }
 
 function enforceBaseRestrictions() {
-  const base = currentBase();
   currentShelves().forEach((unit) => {
-    if (!base.allowedUnits.includes(unit.type) || (unit.placed && !canPlace({ ...unit, kind: "unit" }, unit.x, unit.y, unit.id))) {
+    if (unit.placed && !canPlace({ ...unit, kind: "unit" }, unit.x, unit.y, unit.id)) {
       unit.placed = false;
       unit.x = null;
       unit.y = null;
@@ -1494,7 +2034,11 @@ function renderUnitPlantSlots(unit, shelfIndex) {
     const ready = Boolean(plant?.ready);
     const dead = Boolean(plant?.dead);
     const sprite = plantSprite(plant);
-    return `<span class="box-plant-slot ${plant ? "planted" : "empty"} ${ready ? "ready" : ""} ${dead ? "dead" : ""} stage-${stage}" data-shelf="${shelfIndex}" data-slot="${slotIndex}" data-box-plant-slot style="--slot-x:${slot.x}%;--slot-y:${slot.y}%;--slot-size:${slot.size}%;--slot-z:${slot.z};--crop-color:${crop?.color || "#72ffb8"}" role="button" aria-label="${crop ? `${crop.name} slot ${slotIndex + 1}` : `Empty slot ${slotIndex + 1}`}">
+    const now = Date.now();
+    const stagePulse = Boolean(plant?.stagePulseAt && now - plant.stagePulseAt < 1500);
+    const readyPulse = Boolean(plant?.readyPulseAt && now - plant.readyPulseAt < 1900);
+    const slotPulseClass = `${stagePulse ? "stage-pop" : ""} ${readyPulse ? "ready-pop" : ""}`.trim();
+    return `<span class="box-plant-slot ${plant ? "planted" : "empty"} ${ready ? "ready" : ""} ${dead ? "dead" : ""} ${slotPulseClass} stage-${stage}" data-shelf="${shelfIndex}" data-slot="${slotIndex}" data-box-plant-slot style="--slot-x:${slot.x}%;--slot-y:${slot.y}%;--slot-size:${slot.size}%;--slot-z:${slot.z};--crop-color:${crop?.color || "#72ffb8"}" role="button" aria-label="${crop ? `${crop.name} slot ${slotIndex + 1}` : `Empty slot ${slotIndex + 1}`}">
       ${sprite ? `<img class="box-plant-sprite" src="${sprite}" alt="" draggable="false">` : ""}
       ${ready ? `<span class="box-ready-dot"></span>` : ""}
     </span>`;
@@ -1514,6 +2058,8 @@ function updatePlantVisualStage(plant) {
   const nextStage = plant.ready ? 5 : plant.dead ? 1 : growthStageIndex(plant.growth / crop.days);
   if (plant.visualStage === nextStage) return false;
   plant.visualStage = nextStage;
+  plant.stagePulseAt = Date.now();
+  if (nextStage === 5) plant.readyPulseAt = plant.stagePulseAt;
   return true;
 }
 
@@ -1558,6 +2104,27 @@ function plantingResourceCost(cropId, unit) {
   };
 }
 
+function resourceShortageContext(cropId, unit, cost) {
+  const waterMissing = Math.max(0, cost.water - state.water);
+  const nutrientMissing = Math.max(0, cost.nutrient - state.nutrient);
+  const missing = [];
+  if (waterMissing > 0.001) missing.push(`? ${formatResource(waterMissing)}`);
+  if (nutrientMissing > 0.001) missing.push(`?? ${formatResource(nutrientMissing)}`);
+  return {
+    cropId,
+    cropName: CROPS[cropId]?.name || cropId,
+    unitType: unit.type,
+    unitName: GROW_UNITS[unit.type]?.name || unit.type,
+    waterRequired: formatResource(cost.water),
+    nutrientRequired: formatResource(cost.nutrient),
+    waterCurrent: formatResource(state.water),
+    nutrientCurrent: formatResource(state.nutrient),
+    waterMissing: formatResource(waterMissing),
+    nutrientMissing: formatResource(nutrientMissing),
+    missingResources: missing.join(' / ') || '??'
+  };
+}
+
 function setStatus(message) {
   state.log = message;
   const status = document.getElementById("status-text");
@@ -1565,15 +2132,123 @@ function setStatus(message) {
 }
 
 const soundPool = {};
+const loopAudioPool = {};
 
-function playSound(name, volume = 0.28) {
+function playSound(name, volume = null) {
   const source = SOUND_FILES[name];
   if (!source) return;
   const audio = soundPool[name] || new Audio(source);
   soundPool[name] = audio;
-  audio.volume = volume;
+  audio.volume = Math.max(0, Math.min(1, volume ?? SOUND_VOLUMES[name] ?? 0.28));
   audio.currentTime = 0;
   audio.play().catch(() => {});
+}
+
+function playCommsSound(commsEntry, fallback = "comms_open") {
+  const event = commsEntry?.event || commsEntry;
+  playSound(event?.sound || fallback, event?.soundVolume ?? null);
+}
+
+function loopAudio(id, source) {
+  if (!source || source === "none") return null;
+  if (!loopAudioPool[id]) {
+    const audio = new Audio(source);
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = 0;
+    loopAudioPool[id] = audio;
+  }
+  return loopAudioPool[id];
+}
+
+function setLoopVolume(id, source, volume) {
+  const audio = loopAudio(id, source);
+  if (!audio) return;
+  audio.volume = Math.max(0, Math.min(1, volume));
+  if (volume > 0) {
+    if (audio.paused) audio.play().catch(() => {});
+  } else {
+    audio.pause();
+  }
+}
+
+function currentAmbientConditions() {
+  const placedUnits = allShelves().filter((unit) => unit.placed);
+  const planted = activePlants().length;
+  const cleaningNeeded = ownedBases().some((base) => [...base.shelves, ...base.floorDevices].some(needsCleaning));
+  const fanDevice = allFloorDevices().some((device) => device.placed && device.type === "fan");
+  const demand = resourceDemand();
+  return {
+    always: true,
+    time_running: Boolean(state.timeUnlocked && !state.paused && !state.ended),
+    plants: planted > 0,
+    cleaning_needed: cleaningNeeded,
+    fan_device: fanDevice,
+    many_units: placedUnits.length >= 3,
+    water_low: demand.water > 0 && state.water <= Math.max(2, demand.water * 3),
+    market_unlocked: Boolean(state.marketTabUnlocked)
+  };
+}
+
+function ambientLayerActive(layer) {
+  const condition = layer.condition || "always";
+  if (condition.startsWith("base_tier:")) {
+    return currentBase().tier === condition.split(":")[1];
+  }
+  if (condition.startsWith("market:")) {
+    return document.getElementById("market-screen")?.classList.contains("active")
+      && selectedMarket === condition.split(":")[1];
+  }
+  const conditions = currentAmbientConditions();
+  return Boolean(conditions[condition]);
+}
+
+function activeAmbientLayers() {
+  if (state.audio?.noiseCanceling) return [];
+  return Object.entries(AMBIENT_LAYERS).filter(([, layer]) => ambientLayerActive(layer));
+}
+
+function syncLoopAudio() {
+  if (!state?.audio) return;
+  const activeIds = new Set();
+  activeAmbientLayers().forEach(([id, layer]) => {
+    const audioId = `ambient:${id}`;
+    activeIds.add(audioId);
+    setLoopVolume(audioId, layer.file, layer.volume);
+  });
+  const radio = RADIO_PROGRAMS[state.audio.radioProgram];
+  if (radio && radio.file && radio.file !== "none") {
+    const audioId = `radio:${state.audio.radioProgram}`;
+    activeIds.add(audioId);
+    setLoopVolume(audioId, radio.file, radio.volume);
+  }
+  Object.entries(loopAudioPool).forEach(([id, audio]) => {
+    if (activeIds.has(id)) return;
+    audio.pause();
+    audio.volume = 0;
+  });
+}
+
+function setNoiseCanceling(enabled) {
+  state.audio.noiseCanceling = Boolean(enabled);
+  saveGame();
+  renderRadio();
+  syncLoopAudio();
+  playSound(state.audio.noiseCanceling ? "environment_adjust" : "tab_switch", 0.14);
+  hapticFeedback(state.audio.noiseCanceling ? [8, 26, 8] : 8);
+  terminalSurfaceFeedback("radio");
+  toast(state.audio.noiseCanceling ? "Noise canceling enabled." : "Ambient audio restored.");
+}
+
+function selectRadioProgram(programId) {
+  if (!RADIO_PROGRAMS[programId]) return;
+  state.audio.radioProgram = programId;
+  saveGame();
+  renderRadio();
+  syncLoopAudio();
+  playSound("radio_select", 0.12);
+  hapticFeedback(8);
+  terminalSurfaceFeedback("radio");
 }
 
 function burstEffect(target, color = "#72ffb8", count = 12) {
@@ -1642,8 +2317,117 @@ function pulseElement(element, className = "reward-pulse") {
   window.setTimeout(() => element.classList.remove(className), 700);
 }
 
+function hapticFeedback(pattern = 10) {
+  if (!navigator?.vibrate) return;
+  try {
+    navigator.vibrate(pattern);
+  } catch (error) {}
+}
+
+function tactileFeedback(target, { sound = "click", volume = 0.08, vibration = 8, className = "tactile-pop" } = {}) {
+  if (sound) playSound(sound, volume);
+  if (vibration) hapticFeedback(vibration);
+  if (target) pulseElement(target, className);
+}
+
+function feedbackRect(target) {
+  if (!target) return null;
+  if (typeof target.getBoundingClientRect === "function") {
+    const rect = target.getBoundingClientRect();
+    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  }
+  if (["left", "top", "width", "height"].every((key) => Number.isFinite(target[key]))) return target;
+  return null;
+}
+
+function floatingFeedback(target, textValue, color = "#f5d65b", className = "") {
+  if (!target || !textValue) return;
+  const rect = feedbackRect(target);
+  if (!rect) return;
+  const element = document.createElement("div");
+  element.className = ("floating-feedback " + className).trim();
+  element.textContent = textValue;
+  element.style.left = (rect.left + rect.width / 2) + "px";
+  element.style.top = (rect.top + rect.height * 0.32) + "px";
+  element.style.setProperty("--float-color", color);
+  document.body.appendChild(element);
+  window.setTimeout(() => element.remove(), 980);
+}
+
+function animateMoneyCounter(fromValue, toValue) {
+  const element = document.getElementById("money-value");
+  if (!element) return;
+  const start = Number(fromValue) || 0;
+  const end = Number(toValue) || 0;
+  const startedAt = performance.now();
+  const duration = 620;
+  const tick = (now) => {
+    const t = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    element.textContent = formatNumber(Math.round(start + (end - start) * eased));
+    if (t < 1) requestAnimationFrame(tick);
+    else element.textContent = formatNumber(end);
+  };
+  requestAnimationFrame(tick);
+}
+
+function saleStreamEffect(sourceElement, cropId, qty = 1, premium = false) {
+  const target = document.getElementById("money-value");
+  const crop = CROPS[cropId];
+  if (!sourceElement || !target || !crop?.icon) return;
+  const from = feedbackRect(sourceElement);
+  const to = feedbackRect(target);
+  if (!from || !to) return;
+  const count = Math.min(7, Math.max(3, qty));
+  const layer = document.createElement("div");
+  layer.className = ("sale-stream " + (premium ? "premium" : "")).trim();
+  for (let index = 0; index < count; index += 1) {
+    const pip = document.createElement("img");
+    pip.src = crop.icon;
+    pip.alt = "";
+    const startX = from.left + from.width * (0.3 + Math.random() * 0.4);
+    const startY = from.top + from.height * (0.25 + Math.random() * 0.5);
+    pip.style.left = startX + "px";
+    pip.style.top = startY + "px";
+    pip.style.setProperty("--dx", (to.left + to.width / 2 - startX + (Math.random() * 30 - 15)) + "px");
+    pip.style.setProperty("--dy", (to.top + to.height / 2 - startY + (Math.random() * 20 - 10)) + "px");
+    pip.style.setProperty("--delay", (index * 48) + "ms");
+    layer.appendChild(pip);
+  }
+  document.body.appendChild(layer);
+  window.setTimeout(() => layer.remove(), 980);
+}
+
+function saleRewardEffect({ sourceElement, sourceRect, cropId, revenue, qty, quality, premium, fromMoney, toMoney }) {
+  const source = sourceRect || sourceElement;
+  floatingFeedback(source, "+?" + formatNumber(revenue), premium ? "#fff2a8" : "#f5d65b", premium ? "cash premium" : "cash");
+  if (qty > 1) floatingFeedback(source, qty + " SOLD", CROPS[cropId]?.color || "#72ffb8", "small");
+  saleStreamEffect(source, cropId, qty, premium);
+  window.setTimeout(() => {
+    animateMoneyCounter(fromMoney, toMoney);
+    pulseElement(document.getElementById("money-value"), premium ? "cash-shock-premium" : "cash-shock");
+  }, 120);
+  if (premium) window.setTimeout(() => toast((CROPS[cropId]?.name || cropId) + " ???? // Q-" + quality), 180);
+}
+
+function plantGrowthFeedback(target, plant) {
+  if (!target || !plant) return;
+  const crop = CROPS[plant.crop];
+  floatingFeedback(target, plant.ready ? "READY" : "STAGE " + (plant.visualStage || plantVisualStage(plant)), plant.ready ? "#f5d65b" : crop?.color || "#72ffb8", plant.ready ? "ready" : "small");
+  burstEffect(target, plant.ready ? "#f5d65b" : crop?.color || "#72ffb8", plant.ready ? 18 : 8);
+}
+
+function terminalSurfaceFeedback(tabId) {
+  const screen = document.getElementById(tabId + "-screen");
+  if (!screen) return;
+  screen.classList.remove("terminal-flash");
+  void screen.offsetWidth;
+  screen.classList.add("terminal-flash");
+  window.setTimeout(() => screen.classList.remove("terminal-flash"), 420);
+}
+
 function rejectFeedback() {
-  playSound("alert", 0.18);
+  playSound("feedback_reject", 0.18);
   pulseElement(document.getElementById("app"), "micro-shake");
 }
 
@@ -1656,6 +2440,7 @@ function toast(message, type = "") {
 }
 
 function switchTab(tabId) {
+  const previousTab = document.querySelector(".screen.active")?.id?.replace("-screen", "");
   if (tabId === "market" && !state.marketTabUnlocked) {
     toast("Action unavailable right now.", "warning");
     rejectFeedback();
@@ -1677,13 +2462,66 @@ function switchTab(tabId) {
   document.querySelectorAll(".screen").forEach((screen) => {
     screen.classList.toggle("active", screen.id === `${tabId}-screen`);
   });
+  if (tabId === "radio") renderRadio();
+  if (previousTab !== tabId) {
+    playSound("tab_switch", 0.18);
+    hapticFeedback(8);
+    trackTabAnalytics(tabId, previousTab);
+    terminalSurfaceFeedback(tabId);
+  }
+}
+
+function commsContextValue(context = {}, key = "") {
+  if (key in context) return context[key];
+  if (key === "cropName" && context.cropId) return CROPS[context.cropId]?.name;
+  if (key === "marketName" && context.marketId) return MARKETS[context.marketId]?.name;
+  if (key === "itemName" && context.itemId) {
+    return EQUIPMENT[context.itemId]?.name || CROPS[context.itemId]?.name || GROW_UNITS[context.itemId]?.name || FLOOR_DEVICES[context.itemId]?.name;
+  }
+  if (key === "unitName" && context.unitType) return GROW_UNITS[context.unitType]?.name;
+  if (key === "deviceName" && context.deviceType) return FLOOR_DEVICES[context.deviceType]?.name;
+  return undefined;
+}
+
+function commsContextMatches(matchers = [], context = {}) {
+  return matchers.every((matcher) => {
+    const actual = commsContextValue(context, matcher.key);
+    const expected = matcher.value;
+    const actualText = actual === undefined || actual === null ? "" : String(actual);
+    return matcher.operator === "!=" ? actualText !== expected : actualText === expected;
+  });
+}
+
+function commsEventMatches(entry, trigger, context = {}) {
+  return entry.trigger === trigger
+    && (!entry.once || !state.commsSeen[entry.id])
+    && requirementsMet(entry.requirements || [])
+    && commsContextMatches(entry.context || [], context);
+}
+
+function commsVariables(context = {}) {
+  const itemId = context.itemId || context.cropId || context.unitType || context.deviceType || "";
+  return {
+    ...context,
+    cropName: context.cropName || (context.cropId ? CROPS[context.cropId]?.name : "") || "",
+    marketName: context.marketName || (context.marketId ? MARKETS[context.marketId]?.name : "") || "",
+    itemName: context.itemName || (itemId ? (EQUIPMENT[itemId]?.name || CROPS[itemId]?.name || GROW_UNITS[itemId]?.name || FLOOR_DEVICES[itemId]?.name) : "") || "",
+    unitName: context.unitName || (context.unitType ? GROW_UNITS[context.unitType]?.name : "") || "",
+    deviceName: context.deviceName || (context.deviceType ? FLOOR_DEVICES[context.deviceType]?.name : "") || ""
+  };
+}
+
+function formatCommsText(template = "", context = {}) {
+  const vars = commsVariables(context);
+  return String(template).replaceAll(/\{([^}]+)\}/g, (_, key) => {
+    const value = vars[key.trim()];
+    return value === undefined || value === null ? "" : String(value);
+  });
 }
 
 function triggerComms(trigger, context = {}) {
   if (!state || state.ended) return;
-  const events = COMM_EVENTS.filter((entry) =>
-    entry.trigger === trigger && (!entry.once || !state.commsSeen[entry.id])
-  );
+  const events = COMM_EVENTS.filter((entry) => commsEventMatches(entry, trigger, context));
   if (!events.length) {
     if (activeComms) renderComms();
     return;
@@ -1697,7 +2535,7 @@ function triggerComms(trigger, context = {}) {
   pendingComms.push(...nextEvents);
   persistCommsState();
   renderComms();
-  playSound("alert", 0.16);
+  playCommsSound(activeComms, "comms_open");
   saveGame();
 }
 
@@ -1733,7 +2571,7 @@ function restoreCommsState() {
       page: Math.max(0, Math.min(Number(entry.page) || 0, maxPage)),
       context: entry.context || {}
     };
-  }).filter(Boolean);
+  }).filter(Boolean).filter(commsEntryStillValid);
   activeComms = restored.shift() || null;
   pendingComms = restored;
   persistCommsState();
@@ -1763,8 +2601,8 @@ function renderComms() {
   document.getElementById("comms-kicker").textContent = event.kicker || "COMMS";
   document.getElementById("comms-speaker-name").textContent = event.speakerName || "---";
   document.getElementById("comms-speaker-role").textContent = event.speakerRole || "---";
-  document.getElementById("comms-title").textContent = event.title || "INCOMING MESSAGE";
-  document.getElementById("comms-text").textContent = pages[page];
+  document.getElementById("comms-title").textContent = formatCommsText(event.title || "INCOMING MESSAGE", activeComms.context);
+  document.getElementById("comms-text").textContent = formatCommsText(pages[page], activeComms.context);
   document.getElementById("comms-progress").textContent = pages.length > 1 ? `${page + 1}/${pages.length}` : "";
   document.getElementById("comms-actions").innerHTML = lastPage
     ? (event.choices.length ? event.choices : [{ id: "close", label: text("comms_close", "Close") }]).map((choice) =>
@@ -1774,22 +2612,47 @@ function renderComms() {
   banner.classList.remove("hidden");
 }
 
+function commsEffectApplies(effect, choiceId) {
+  return !effect.choice || effect.choice === "*" || effect.choice === choiceId;
+}
+
+function runCommsEffect(effect) {
+  if (!effect) return;
+  if (effect.action === "tab" && effect.value) {
+    switchTab(effect.value);
+    return;
+  }
+  if (effect.action === "unlock_time") {
+    unlockTutorialTime();
+    return;
+  }
+  if (effect.action === "add_device" && effect.value) {
+    if (grantFloorDevice(effect.value)) render();
+    return;
+  }
+}
+
+function applyCommsEffects(event, choiceId) {
+  (event.effects || [])
+    .filter((effect) => commsEffectApplies(effect, choiceId))
+    .forEach(runCommsEffect);
+}
+
+function commsEntryStillValid(entry) {
+  return requirementsMet(entry?.event?.requirements || [])
+    && commsContextMatches(entry?.event?.context || [], entry?.context || {});
+}
+
 function closeComms(choiceId = "close") {
   if (!activeComms) return;
   const closedEvent = activeComms.event;
   state.commsChoices[closedEvent.id] = choiceId;
+  applyCommsEffects(closedEvent, choiceId);
+  pendingComms = pendingComms.filter(commsEntryStillValid);
   activeComms = pendingComms.shift() || null;
   persistCommsState();
   renderComms();
-  if (closedEvent.trigger === "first_harvest" && choiceId === "lower") switchTab("market");
-  if (closedEvent.trigger === "shop_unlocked_after_lettuce" && choiceId === "open") switchTab("shop");
-  if (["unlock_basil", "unlock_box", "unlock_devices", "unlock_storage"].includes(closedEvent.trigger) && choiceId === "open") switchTab("shop");
-  if (["market_medical_unlocked", "market_upper_unlocked", "market_rebel_unlocked"].includes(closedEvent.trigger) && choiceId === "accept") switchTab("market");
-  if (closedEvent.trigger === "property_broker_unlocked" && choiceId === "open") switchTab("broker");
-  if (closedEvent.trigger === "shop_unlocked_after_lettuce" && !state.timeUnlocked) triggerComms("tutorial_time_reflection");
-  if (closedEvent.trigger === "tutorial_time_reflection" && !state.timeUnlocked) triggerComms("tutorial_time_start");
-  if (closedEvent.trigger === "tutorial_time_start") unlockTutorialTime();
-  if (activeComms) playSound("alert", 0.14);
+  if (activeComms) playCommsSound(activeComms, "comms_next");
   saveGame();
 }
 
@@ -1897,6 +2760,7 @@ function createDay30Summary(options = {}) {
     equipmentCount: maintainedEquipmentCount(),
     propertyCount: ownedBases().length,
     eventRevenue: Math.round(Number(state.tradeStats?.eventRevenue) || 0),
+    analytics: createAnalyticsSummary(),
     titles: []
   };
   summary.titles = day30Titles(summary);
@@ -1944,7 +2808,7 @@ function nextCommsPage() {
   activeComms.page += 1;
   persistCommsState();
   renderComms();
-  playSound("click", 0.12);
+  playSound("comms_page", 0.12);
 }
 
 function spriteContentRect(image, rect) {
@@ -2090,6 +2954,7 @@ function canReturnEquipmentToStock(kind, item) {
 }
 
 function canSellEquipment(kind, item) {
+  if (kind === "device" && item.type === "support_robot") return false;
   return kind !== "unit" || !item.slots.some(Boolean);
 }
 
@@ -2214,7 +3079,7 @@ function openEquipmentMenu(element, event, options = {}) {
       element.setPointerCapture(event.pointerId);
     } catch (error) {}
   }
-  playSound("grab", 0.18);
+  playSound("equipment_menu_open", 0.18);
   suppressClickUntil = Date.now() + 300;
   event.preventDefault();
   return true;
@@ -2326,7 +3191,7 @@ function beginCleanToolDrag(button, event) {
       button.setPointerCapture(event.pointerId);
     } catch (error) {}
   }
-  playSound("grab", 0.18);
+  playSound("clean_tool_grab", 0.18);
   event.preventDefault();
 }
 
@@ -2346,7 +3211,7 @@ function updateCleanToolDrag(event) {
     target.classList.add("clean-tool-target");
     const now = Date.now();
     if (cleanToolDrag.tool === "brush" && now - cleanToolDrag.lastSoundAt > 420) {
-      playSound("brush", 0.08);
+      playSound("clean_tool_brush_loop", 0.08);
       cleanToolDrag.lastSoundAt = now;
     }
   }
@@ -2375,6 +3240,15 @@ function selectedPlacementItem() {
   return record ? { ...record.item, kind: placementSelection.kind } : null;
 }
 
+function cancelPlacementSelection() {
+  if (!placementSelection) return;
+  placementSelection = null;
+  selectedUnitId = null;
+  selectedDeviceId = null;
+  setStatus("設置をキャンセルしました。未設置の設備はストックから再配置できます。");
+  renderFarm();
+}
+
 function placeSelectedAt(x, y) {
   const selected = selectedPlacementItem();
   if (!selected) return;
@@ -2394,6 +3268,7 @@ function placeItemAt(kind, id, x, y, targetElement = null, options = {}) {
   record = moveEquipmentToBase(record, currentBase());
   const item = record.item;
   Object.assign(item, { x, y, placed: true });
+  trackPlacementAnalytics(kind, item);
   removeDuplicateEquipmentEntries(kind, item.id, record.base.id);
   placementSelection = null;
   if (!selectAfterPlace) {
@@ -2407,7 +3282,7 @@ function placeItemAt(kind, id, x, y, targetElement = null, options = {}) {
     selectedUnitId = null;
   }
   setStatus(`${kind === "unit" ? GROW_UNITS[item.type].name : FLOOR_DEVICES[item.type].name}を区画 (${x + 1}, ${y + 1}) に設置しました。`);
-  playSound("place");
+  playSound("equipment_place");
   burstEffect(targetElement, kind === "unit" ? "#72ffb8" : FLOOR_DEVICES[item.type].color, 14);
   triggerComms("first_place", { kind, itemId: item.type });
   updateProgressionUnlocks();
@@ -2590,12 +3465,13 @@ function returnItemToStock(kind, id) {
   item.placed = false;
   item.x = null;
   item.y = null;
+  trackStockAnalytics(kind, item);
   placementSelection = null;
   selectedUnitId = null;
   selectedDeviceId = null;
   setStatus(`${definition.name}をStockへ戻しました。`);
   toast(`${definition.name}をStockへ収納`);
-  playSound("click", 0.2);
+  playSound("stock_store", 0.2);
   saveGame();
   renderFarm();
 }
@@ -2607,9 +3483,9 @@ function refreshPropertyListings() {
     return;
   }
   state.money -= fee;
-  state.propertyListings = generatePropertyListings(5);
+  state.propertyListings = generatePropertyListings(PROPERTY_LISTING_COUNT);
   setStatus(`不動産ブローカーへ更新料 ₡${PROPERTY_REROLL_FEE}を支払い、新しい物件情報を取得しました。`);
-  playSound("click");
+  playSound("property_refresh");
   saveGame();
   render();
 }
@@ -2623,7 +3499,7 @@ function refreshProcurementLineup() {
   state.procurementTags = {};
   ensureProcurementTags();
   setStatus(`マラへ更新料 ₡${PROCUREMENT_REROLL_FEE}を支払い、タグ付き設備ラインナップを引き直しました。`);
-  playSound("click");
+  playSound("procurement_refresh");
   saveGame();
   render();
 }
@@ -2643,12 +3519,13 @@ function sellOwnedItem(kind, id) {
   const index = collection.indexOf(item);
   collection.splice(index, 1);
   state.money += refund;
+  trackEquipmentSaleAnalytics(kind, item, refund);
   selectedUnitId = selectedUnitId === id ? null : selectedUnitId;
   selectedDeviceId = selectedDeviceId === id ? null : selectedDeviceId;
   placementSelection = null;
   setStatus(`${definition.name}を解体売却し、₡${formatNumber(refund)}を回収しました。`);
   toast(`売却 +₡${formatNumber(refund)}`);
-  playSound("sale", 0.26);
+  playSound("equipment_sell", 0.26);
   saveGame();
   render();
 }
@@ -2662,14 +3539,15 @@ function contractProperty(propertyId) {
   state.money -= property.price;
   const newBase = normalizeBase({ ...property, price: 0, shelves: [], floorDevices: [], ownedAt: Date.now() });
   state.bases.push(newBase);
+  trackPurchase("property", propertyId, property.price, { itemName: property.name, width: newBase.width, height: newBase.height, tier: newBase.tier });
   state.activeBaseId = newBase.id;
   placementSelection = null;
   selectedUnitId = null;
   selectedDeviceId = null;
-  state.propertyListings = generatePropertyListings(5);
+  state.propertyListings = generatePropertyListings(PROPERTY_LISTING_COUNT);
   setStatus(`${property.name}を追加拠点として契約しました。新しい区画を選択中です。`);
   toast(`NEW BASE ADDED // ${property.name}`);
-  playSound("purchase");
+  playSound("property_contract");
   triggerComms("relocate", { propertyId });
   updateProgressionUnlocks();
   saveGame();
@@ -2677,85 +3555,31 @@ function contractProperty(propertyId) {
   switchTab("farm");
 }
 
-const ENDING_DEFINITIONS = {
-  upper: { title: "Upper Patron Ending", threshold: 12000, text: "The upper district offers an exclusive production contract." },
-  lower: { title: "Local Support Ending", threshold: 10000, text: "The lower district recognizes you as a steady food supplier." },
-  medical: { title: "Medical Research Ending", threshold: 10000, text: "The medical experimental district invites your farm into research supply." },
-  rebel: { title: "Revolution Support Ending", threshold: 9000, text: "The underground network turns your farm into a supply node." }
-};
-
-function showEndingOffer(marketId) {
-  const ending = ENDING_DEFINITIONS[marketId];
-  state.endingOffers[marketId] = true;
-  state.paused = true;
-  document.getElementById("modal-kicker").textContent = "FACTION ROUTE EVENT";
-  document.getElementById("modal-title").textContent = ending.title;
-  document.getElementById("modal-content").innerHTML = `<p>${ending.text}</p><div class="ending-choice"><button class="primary-button" data-ending-accept="${marketId}">Accept route</button><button class="secondary-button" data-ending-decline="${marketId}">Decline</button></div>`;
-  document.getElementById("modal-close").hidden = true;
-  document.getElementById("modal-backdrop").classList.remove("hidden");
-  playSound("alert");
-}
-
-function finishEnding(marketId) {
-  const ending = ENDING_DEFINITIONS[marketId];
-  state.ending = marketId;
-  state.ended = true;
-  state.paused = true;
-  document.getElementById("modal-kicker").textContent = "OPERATION END";
-  document.getElementById("modal-title").textContent = ending.title;
-  document.getElementById("modal-content").innerHTML = `<p>${ending.text}</p><p>Total trade: C${formatNumber(state.tradeStats.revenue)}</p>`;
-  document.getElementById("modal-close").hidden = false;
-  document.getElementById("modal-backdrop").classList.remove("hidden");
-  saveGame();
-  render();
-}
-
 function checkFactionProgression() {
-  const totals = state.tradeStats.byMarket;
   updateProgressionUnlocks();
-
-  const eligible = {
-    upper: totals.upper >= ENDING_DEFINITIONS.upper.threshold,
-    lower: totals.lower >= ENDING_DEFINITIONS.lower.threshold,
-    medical: totals.medical >= ENDING_DEFINITIONS.medical.threshold,
-    rebel: totals.rebel >= ENDING_DEFINITIONS.rebel.threshold
-      && state.tradeStats.foodToRebels >= 5000
-      && state.tradeStats.weaponsToRebels >= 2500
-  };
-  const pending = Object.keys(eligible).find((marketId) =>
-    eligible[marketId] && !state.endingOffers[marketId] && !state.endingDeclined[marketId]
-  );
-  if (pending && !state.ended) showEndingOffer(pending);
-
-  if (Object.keys(ENDING_DEFINITIONS).every((marketId) => state.endingDeclined[marketId]) && !state.ended) {
-    state.ending = "corporate";
-    state.ended = true;
-    state.paused = true;
-    document.getElementById("modal-kicker").textContent = "INDEPENDENT ROUTE";
-    document.getElementById("modal-title").textContent = "Corporate Expansion Ending";
-    document.getElementById("modal-content").innerHTML = "<p>You declined every faction offer and turned UNDERGREEN into an independent underground agriculture firm.</p>";
-    document.getElementById("modal-close").hidden = false;
-    document.getElementById("modal-close").style.display = "";
-    document.getElementById("modal-backdrop").classList.remove("hidden");
-    saveGame();
-    render();
-  }
 }
 
 function plantSeed(shelfIndex, slotIndex, cropId = selectedSeed, sourceElement = null) {
   if (state.ended) return;
   if (!cropId || state.seeds[cropId] <= 0) {
+    trackPlantingFailure("seed_unavailable", { cropId });
     toast("Action failed.", "error");
     rejectFeedback();
     return;
   }
   const unit = currentShelves()[shelfIndex];
   const slot = unit.slots[slotIndex];
-  if (slot) return;
+  if (slot) {
+    trackPlantingFailure("occupied_slot", { cropId, unitType: unit.type, shelfIndex, slotIndex });
+    return;
+  }
 
   const plantingCost = plantingResourceCost(cropId, unit);
   if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) {
-    toast("Action failed.", "error");
+    const shortageContext = resourceShortageContext(cropId, unit, plantingCost);
+    trackPlantingFailure(plantingShortageReason(shortageContext), shortageContext);
+    toast(`????: ${shortageContext.missingResources}`, "warning");
+    triggerComms("plant_resource_shortage", shortageContext);
     rejectFeedback();
     return;
   }
@@ -2763,7 +3587,9 @@ function plantSeed(shelfIndex, slotIndex, cropId = selectedSeed, sourceElement =
   state.water -= plantingCost.water;
   state.nutrient -= plantingCost.nutrient;
   state.seeds[cropId] -= 1;
+  const plantedAt = Date.now();
   unit.slots[slotIndex] = {
+    id: makeId("plant"),
     crop: cropId,
     growth: 0,
     ready: false,
@@ -2774,16 +3600,30 @@ function plantSeed(shelfIndex, slotIndex, cropId = selectedSeed, sourceElement =
     witherProgress: 0,
     dead: false,
     visualStage: 1,
+    stagePulseAt: plantedAt,
     prepaid: !GROW_UNITS[unit.type].continuous,
     quality: null
   };
+  trackPlanting(cropId, unit, shelfIndex, slotIndex, plantingCost);
   const resourceNote = plantingCost.water || plantingCost.nutrient
     ? ` Initial feed: water ${formatResource(plantingCost.water)} / nutrient ${formatResource(plantingCost.nutrient)}`
     : " Continuous feed while growing.";
   setStatus(`${CROPS[cropId].name} planted in ${GROW_UNITS[unit.type].name} ${shelfIndex + 1}.${resourceNote}`);
-  playSound("plant");
-  burstEffect(sourceElement || document.querySelector(`[data-shelf="${shelfIndex}"][data-slot="${slotIndex}"]`), CROPS[cropId].color, 10);
-  triggerComms("first_plant", { cropId });
+  const plantTarget = sourceElement || document.querySelector(`[data-shelf="${shelfIndex}"][data-slot="${slotIndex}"]`);
+  playSound("plant_seed");
+  hapticFeedback(12);
+  burstEffect(plantTarget, CROPS[cropId].color, 14);
+  pulseElement(document.querySelector(`[data-select-unit="${unit.id}"]`), "equipment-confirm");
+  const commsContext = {
+    cropId,
+    cropName: CROPS[cropId]?.name || cropId,
+    unitType: unit.type,
+    unitName: GROW_UNITS[unit.type]?.name || unit.type,
+    shelfIndex,
+    slotIndex
+  };
+  triggerComms("first_plant", commsContext);
+  triggerComms("plant", commsContext);
   saveGame();
   render();
 }
@@ -2828,14 +3668,29 @@ function harvest(shelfIndex, slotIndex, sourceElement = null) {
     });
   }
 
+  trackHarvestAnalytics(plant, shelf, 1);
   if (plant.crop === "tomato") state.tomatoHarvested = true;
+  const harvestTarget = sourceElement || document.querySelector(`[data-shelf="${shelfIndex}"][data-slot="${slotIndex}"]`);
   shelf.slots[slotIndex] = null;
   setStatus(`${CROPS[plant.crop].name}を収穫。品質 ${plant.quality} を在庫へ移しました。`);
   toast(`${CROPS[plant.crop].name}を収穫しました`);
-  playSound("harvest");
-  burstEffect(sourceElement || document.querySelector(`[data-shelf="${shelfIndex}"][data-slot="${slotIndex}"]`), QUALITY[plant.quality].color, 20);
+  playSound("harvest_single");
+  hapticFeedback(10);
+  burstEffect(harvestTarget, QUALITY[plant.quality].color, 24);
+  floatingFeedback(harvestTarget, "+1 " + CROPS[plant.crop].name, QUALITY[plant.quality].color, "harvest");
   state.marketTabUnlocked = true;
-  triggerComms("first_harvest", { cropId: plant.crop });
+  const commsContext = {
+    cropId: plant.crop,
+    cropName: CROPS[plant.crop]?.name || plant.crop,
+    quality: plant.quality,
+    unitType: shelf.type,
+    unitName: GROW_UNITS[shelf.type]?.name || shelf.type,
+    shelfIndex,
+    slotIndex,
+    qty: 1
+  };
+  triggerComms("first_harvest", commsContext);
+  triggerComms("harvest", commsContext);
   checkVictory();
   saveGame();
   render();
@@ -2872,9 +3727,18 @@ function harvestReadyPlantsInUnit(unitId, sourceElement = null) {
         degraded: plant.degraded
       });
     }
+    trackHarvestAnalytics(plant, shelf, 1);
     if (plant.crop === "tomato") state.tomatoHarvested = true;
     lastCrop = plant.crop;
     lastQuality = plant.quality;
+    const slotTarget = document.querySelector(`[data-shelf="${shelfIndex}"][data-slot="${slotIndex}"]`);
+    if (slotTarget) {
+      const qualityColor = QUALITY[plant.quality]?.color || "#72ffb8";
+      window.setTimeout(() => {
+        burstEffect(slotTarget, qualityColor, 10);
+        floatingFeedback(slotTarget, "+1", qualityColor, "harvest small");
+      }, harvested * 55);
+    }
     shelf.slots[slotIndex] = null;
     harvested += 1;
   });
@@ -2882,10 +3746,25 @@ function harvestReadyPlantsInUnit(unitId, sourceElement = null) {
   const definition = GROW_UNITS[shelf.type];
   setStatus(`${definition.name}から${harvested}株を収穫しました。品質 ${lastQuality} を在庫へ移しました。`);
   toast(`${definition.name} 収穫 +${harvested}`);
-  playSound("harvest");
-  burstEffect(sourceElement || document.querySelector(`[data-select-unit="${unitId}"]`), QUALITY[lastQuality]?.color || "#72ffb8", 22);
+  playSound("harvest_bulk");
+  hapticFeedback([8, 32, 8]);
+  const bulkTarget = sourceElement || document.querySelector(`[data-select-unit="${unitId}"]`);
+  burstEffect(bulkTarget, QUALITY[lastQuality]?.color || "#72ffb8", 26);
+  floatingFeedback(bulkTarget, "+" + harvested + " STOCK", QUALITY[lastQuality]?.color || "#72ffb8", "harvest");
   state.marketTabUnlocked = true;
-  if (lastCrop) triggerComms("first_harvest", { cropId: lastCrop });
+  if (lastCrop) {
+    const commsContext = {
+      cropId: lastCrop,
+      cropName: CROPS[lastCrop]?.name || lastCrop,
+      quality: lastQuality,
+      unitType: shelf.type,
+      unitName: GROW_UNITS[shelf.type]?.name || shelf.type,
+      unitId,
+      qty: harvested
+    };
+    triggerComms("first_harvest", commsContext);
+    triggerComms("harvest", commsContext);
+  }
   checkVictory();
   saveGame();
   render();
@@ -2947,6 +3826,7 @@ function handleSlotClick(shelfIndex, slotIndex) {
 function removeDeadPlant(shelfIndex, slotIndex) {
   const plant = currentShelves()[shelfIndex].slots[slotIndex];
   if (!plant || !plant.dead) return;
+  trackDeadPlantAnalytics(plant, currentShelves()[shelfIndex], "removed");
   currentShelves()[shelfIndex].slots[slotIndex] = null;
   setStatus(`枯死した${CROPS[plant.crop].name}を撤去しました。`);
   saveGame();
@@ -2966,11 +3846,21 @@ function buySeed(cropId) {
   }
   state.money -= crop.seedPrice;
   state.seeds[cropId] += crop.packSize;
+  trackPurchase("seed", cropId, crop.seedPrice, { itemName: crop.name, packSize: crop.packSize });
   selectedSeed = cropId;
   setStatus(`${crop.name} seed pack purchased. +${crop.packSize} seeds.`);
-  playSound("purchase");
+  playSound("buy_seed");
   pulseElement(document.getElementById("money-value"));
-  triggerComms("buy_seed", { cropId });
+  const commsContext = {
+    itemId: cropId,
+    itemKind: "seed",
+    cropId,
+    cropName: crop.name,
+    itemName: crop.name,
+    packSize: crop.packSize
+  };
+  triggerComms("buy_seed", commsContext);
+  triggerComms("buy_item", commsContext);
   saveGame();
   render();
 }
@@ -2990,11 +3880,6 @@ function buyEquipment(itemId) {
 
   if (itemId === "nutrient" && state.nutrient >= state.nutrientCapacity) {
     toast("Action unavailable right now.", "warning");
-    return;
-  }
-  if (GROW_UNITS[itemId] && !currentBase().allowedUnits.includes(itemId)) {
-    toast("Action unavailable right now.", "warning");
-    rejectFeedback();
     return;
   }
   if ((itemId === "filter" && state.equipment.filter) || (itemId === "fridge" && state.equipment.fridge)) {
@@ -3043,9 +3928,23 @@ function buyEquipment(itemId) {
   const placementNote = GROW_UNITS[itemId] || FLOOR_DEVICES[itemId] ? " Select a place in the facility layout." : "";
   setStatus(`${EQUIPMENT[itemId].name}を購入しました。${placementNote}`);
   toast(`${EQUIPMENT[itemId].name}を調達`);
-  playSound("purchase");
+  playSound("buy_equipment");
   pulseElement(document.getElementById("money-value"));
-  triggerComms(`buy_${GROW_UNITS[itemId] ? `unit_${itemId}` : itemId}`, { itemId });
+  const itemKind = GROW_UNITS[itemId] ? "unit" : FLOOR_DEVICES[itemId] ? "device" : ["water", "nutrient"].includes(itemId) ? "resource" : "upgrade";
+  trackPurchase(itemKind, itemId, price, {
+    itemName: EQUIPMENT[itemId]?.name || itemId,
+    tags,
+    placementRequired: Boolean(GROW_UNITS[itemId] || FLOOR_DEVICES[itemId])
+  });
+  const commsContext = {
+    itemId,
+    itemKind,
+    itemName: EQUIPMENT[itemId]?.name || itemId,
+    unitType: GROW_UNITS[itemId] ? itemId : "",
+    deviceType: FLOOR_DEVICES[itemId] ? itemId : ""
+  };
+  triggerComms(`buy_${GROW_UNITS[itemId] ? `unit_${itemId}` : itemId}`, commsContext);
+  triggerComms("buy_item", commsContext);
   updateProgressionUnlocks();
   if (placementNote) switchTab("farm");
   checkVictory();
@@ -3069,7 +3968,12 @@ function sellBatch(batchId) {
     return;
   }
   const qty = Math.max(1, Math.min(batch.qty, saleQuantities[batchId] || 1));
-  const revenue = getUnitPrice(batch) * qty;
+  const unitPrice = getUnitPrice(batch);
+  const revenue = unitPrice * qty;
+  const moneyBeforeSale = state.money;
+  const saleSourceElement = document.querySelector(`[data-sell-id="${batchId}"]`);
+  const saleSourceRect = feedbackRect(saleSourceElement);
+  const premiumSale = unitPrice >= Math.round((CROPS[batch.crop]?.basePrice || unitPrice) * (batch.quality === "S" ? 1.25 : 1.15));
   batch.qty -= qty;
   state.money += revenue;
   state.tradeStats.unitsSold += qty;
@@ -3080,6 +3984,7 @@ function sellBatch(batchId) {
   state.tradeStats.byCrop ||= {};
   state.tradeStats.byCrop[batch.crop] = (state.tradeStats.byCrop[batch.crop] || 0) + qty;
   if (state.event) state.tradeStats.eventRevenue = (state.tradeStats.eventRevenue || 0) + revenue;
+  trackSaleAnalytics(batch, selectedMarket, qty, unitPrice, revenue, premiumSale);
   if (selectedMarket === "rebel") {
     if (CROPS[batch.crop].category === "weapon") state.tradeStats.weaponsToRebels += revenue;
     else if (CROPS[batch.crop].category === "food") state.tradeStats.foodToRebels += revenue;
@@ -3090,16 +3995,38 @@ function sellBatch(batchId) {
   }
   setStatus(`${MARKETS[selectedMarket].name}で${CROPS[batch.crop].name}を${qty}個売却。₡${formatNumber(revenue)}を受領。`);
   toast(`売却成立 +₡${formatNumber(revenue)}`);
-  playSound("sale", 0.34);
-  pulseElement(document.getElementById("money-value"));
-  burstEffect(document.querySelector(`[data-sell-id="${batchId}"]`), "#f5d65b", 18);
-  triggerComms("first_sale", { marketId: selectedMarket, cropId: batch.crop });
+  playSound("sell_crop", premiumSale ? 0.42 : 0.34);
+  hapticFeedback(premiumSale ? [12, 34, 12] : 14);
+  burstEffect(saleSourceElement, premiumSale ? "#fff2a8" : "#f5d65b", premiumSale ? 28 : 18);
+  const commsContext = {
+    marketId: selectedMarket,
+    marketName: MARKETS[selectedMarket]?.name || selectedMarket,
+    cropId: batch.crop,
+    cropName: CROPS[batch.crop]?.name || batch.crop,
+    cropCategory: CROPS[batch.crop]?.category || "",
+    qty,
+    revenue,
+    quality: batch.quality
+  };
+  triggerComms("first_sale", commsContext);
+  triggerComms("sale", commsContext);
   if (selectedMarket === "medical" && CROPS[batch.crop].category === "medical") {
-    triggerComms("medical_specialty_sale", { cropId: batch.crop });
+    triggerComms("medical_specialty_sale", commsContext);
   }
   checkFactionProgression();
   saveGame();
   render();
+  saleRewardEffect({
+    sourceElement: saleSourceElement,
+    sourceRect: saleSourceRect,
+    cropId: batch.crop,
+    revenue,
+    qty,
+    quality: batch.quality,
+    premium: premiumSale,
+    fromMoney: moneyBeforeSale,
+    toMoney: state.money
+  });
 }
 
 function changeSaleQty(batchId, delta) {
@@ -3129,6 +4056,7 @@ function processRealtimeGrowth(deltaDays) {
   const nutrientRatio = requested.nutrient > 0 ? Math.min(1, state.nutrient / requested.nutrient) : 1;
   state.water = Math.max(0, state.water - requested.water * waterRatio);
   state.nutrient = Math.max(0, state.nutrient - requested.nutrient * nutrientRatio);
+  trackResourceGrowthUse(requested.water * waterRatio, requested.nutrient * nutrientRatio);
 
   plants.forEach(({ plant, shelf, baseId }) => {
     const base = ownedBases().find((candidate) => candidate.id === baseId) || currentBase();
@@ -3140,12 +4068,14 @@ function processRealtimeGrowth(deltaDays) {
       if (plant.growth >= CROPS[plant.crop].days) {
         plant.growth = CROPS[plant.crop].days;
         plant.ready = true;
+        plant.readyPulseAt = Date.now();
         updatePlantVisualStage(plant);
         const effects = getUnitEffects(shelf);
         plant.quality = determineQuality(plant, effects.light, effects.fan, perf.qualityBonus);
+      trackPlantReady(plant, shelf);
         toast(`${CROPS[plant.crop].name}が収穫可能になりました`);
         farmRenderRequested = true;
-        playSound("mature", 0.24);
+        playSound("crop_ready", 0.24);
       }
       return;
     }
@@ -3159,9 +4089,10 @@ function processRealtimeGrowth(deltaDays) {
       plant.witherProgress = (plant.witherProgress || 0) + deltaDays;
       if (plant.witherProgress >= WITHER_DAYS) {
         plant.dead = true;
+        trackDeadPlantAnalytics(plant, shelf, "wither");
         plant.ready = false;
         farmRenderRequested = true;
-        playSound("alert", 0.2);
+        playSound("plant_wither", 0.2);
       }
       return;
     }
@@ -3173,12 +4104,14 @@ function processRealtimeGrowth(deltaDays) {
     if (plant.growth >= CROPS[plant.crop].days) {
       plant.growth = CROPS[plant.crop].days;
       plant.ready = true;
+      plant.readyPulseAt = Date.now();
       updatePlantVisualStage(plant);
       const effects = getUnitEffects(shelf);
       plant.quality = determineQuality(plant, effects.light, effects.fan, perf.qualityBonus);
+        trackPlantReady(plant, shelf);
       toast(`${CROPS[plant.crop].name}が収穫可能になりました`);
       farmRenderRequested = true;
-      playSound("mature", 0.24);
+      playSound("crop_ready", 0.24);
     }
   });
 }
@@ -3215,10 +4148,10 @@ function cleanItem(kind, id, tool = "brush") {
   toast(`${definition.name} cleaned.`);
   if (tool === "bucket") {
     cleanSplashEffect(target);
-    playSound("water_splash", 0.2);
+    playSound("clean_bucket", 0.2);
   } else {
     brushCleanEffect(target);
-    playSound("brush", 0.14);
+    playSound("clean_brush", 0.14);
   }
   saveGame();
   render();
@@ -3235,7 +4168,7 @@ function adjustEnvironment(key, delta) {
   const [min, max] = ranges[key] || [0, 9999];
   base.environment[key] = Math.max(min, Math.min(max, base.environment[key] + delta));
   setStatus(`${base.name} environment updated: temp ${base.environment.temp}C / humidity ${base.environment.humidity}% / CO2 ${base.environment.co2}ppm.`);
-  playSound("click", 0.12);
+  playSound("environment_adjust", 0.12);
   saveGame();
   renderFarm();
 }
@@ -3266,11 +4199,12 @@ function processDayBoundary() {
     finalizeDay30Run({ completed: true, playedDays: 30 });
     return;
   }
-  if (state.money <= -500 || state.consecutiveDebtDays >= 3) {
-    if (state.mode === "day30" || state.mode === "free") {
-      finalizeDay30Run({ completed: false, playedDays: state.day, mode: state.mode });
-      return;
-    }
+  const operationFailed = state.money <= -500 || state.consecutiveDebtDays >= 3;
+  if (operationFailed && state.mode === "day30") {
+    finalizeDay30Run({ completed: false, playedDays: state.day, mode: state.mode });
+    return;
+  }
+  if (operationFailed && state.mode !== "free") {
     state.ended = true;
     state.paused = true;
     showEndReport();
@@ -3495,7 +4429,7 @@ function setStartModeView(mode) {
 
 function toggleStartModeView() {
   setStartModeView(startModeView === "free" ? "day30" : "free");
-  playSound("click", 0.12);
+  playSound("start_mode_toggle", 0.12);
 }
 
 function openStartScreen(options = {}) {
@@ -3984,7 +4918,7 @@ function renderFarm() {
   const env = base.environment || DEFAULT_ENVIRONMENT;
   const dirtyCount = [...shelves, ...floorDevices].filter(needsCleaning).length;
   document.getElementById("facility-grid-toolbar").innerHTML = placementItem
-    ? `<span class="placement-active">PLACING // ${placementItem.kind === "unit" ? GROW_UNITS[placementItem.type].name : FLOOR_DEVICES[placementItem.type].name}</span><small>Drop on an open isometric cell / ESC to cancel</small>`
+    ? `<span class="placement-active">PLACING // ${placementItem.kind === "unit" ? GROW_UNITS[placementItem.type].name : FLOOR_DEVICES[placementItem.type].name}</span><div class="placement-tools"><small>Drop on an open isometric cell</small><button type="button" data-cancel-placement>CANCEL</button></div>`
     : `<span>ISOMETRIC FACILITY LAYOUT ${dirtyCount ? `<b class="clean-alert">CLEAN ${dirtyCount}</b>` : ""}</span>
       <div class="environment-controls">
         <button data-env="temp" data-env-delta="-1">-</button><strong>${env.temp}C</strong><button data-env="temp" data-env-delta="1">+</button>
@@ -3993,7 +4927,7 @@ function renderFarm() {
         <button data-view-zoom="-1">ZOOM-</button><strong>${Math.round(facilityView.zoom * 100)}%</strong><button data-view-zoom="1">ZOOM+</button>
         <button data-view-reset>RESET</button>
       </div>
-      <small>${base.allowedUnits.includes("box") ? "BOX READY" : "POD ONLY"}</small>`;
+      <small>GRID READY</small>`;
 
   const coverageDevice = selectedDeviceId
     ? floorDevices.find((device) => device.id === selectedDeviceId && device.placed)
@@ -4031,9 +4965,10 @@ function renderFarm() {
 
   const placedDevices = floorDevices.filter((device) => device.placed).map((device) => {
     const definition = FLOOR_DEVICES[device.type];
+    const deviceLabel = device.type === "light" ? "LED" : device.type === "fan" ? "FAN" : definition.code || definition.name;
     return `<button class="facility-item floor-device device-${device.type} device-running ${needsCleaning(device) ? "needs-cleaning" : ""} ${selectedDeviceId === device.id ? "selected" : ""}"
       style="grid-column:${device.x + 1};grid-row:${device.y + 1};z-index:${20 + device.y}" data-select-device="${device.id}" data-drag-kind="device" data-drag-id="${device.id}">
-      <img class="equipment-sprite" src="${definition.sprite}" alt="" draggable="false"><span class="device-field"></span><span class="item-label">${device.type === "light" ? "LED" : "FAN"}</span>
+      <img class="equipment-sprite" src="${definition.sprite}" alt="" draggable="false"><span class="device-field"></span><span class="item-label">${deviceLabel}</span>
       ${needsCleaning(device) ? `<span class="clean-badge">清掃</span>` : ""}
     </button>`;
   }).join("");
@@ -4087,14 +5022,15 @@ const unplaced = sharedStockItems();
     const item = { ...stockItem, kind };
     const definition = kind === "unit" ? GROW_UNITS[item.type] : FLOOR_DEVICES[item.type];
     const active = placementSelection && placementSelection.id === item.id;
-    const compatible = kind === "device" || base.allowedUnits.includes(item.type);
-    const dragAttributes = compatible ? `data-place-kind="${kind}" data-place-id="${item.id}" data-drag-kind="${kind}" data-drag-id="${item.id}"` : "";
+    const compatible = true;
+    const dragAttributes = `data-place-kind="${kind}" data-place-id="${item.id}" data-drag-kind="${kind}" data-drag-id="${item.id}"`;
     const stockLabel = stockBase.id === base.id ? "CURRENT BASE" : `STOCK // ${stockBase.name}`;
+    const sellButton = canSellEquipment(kind, item) ? `<button class="stock-sell-button" data-sell-stock-kind="${item.kind}" data-sell-stock-id="${item.id}">売却</button>` : "";
     return `<div class="placement-stock-row">
-      <button class="placement-stock stock-${item.type} ${active ? "active" : ""} ${compatible ? "" : "incompatible"}" title="${stockLabel}" ${dragAttributes} ${compatible ? "" : "disabled"}>
+      <button class="placement-stock stock-${item.type} ${active ? "active" : ""}" title="${stockLabel}" ${dragAttributes}>
         <img src="${definition.emptySprite || definition.sprite || definition.icon}" alt=""><span><strong>${definition.name}</strong><small>${definition.width} x ${definition.height}マス${compatible ? "" : " / 非対応"}</small>${tagMarkup(item.tags, EQUIPMENT_TAGS)}</span>
       </button>
-      <button class="stock-sell-button" data-sell-stock-kind="${item.kind}" data-sell-stock-id="${item.id}">売却</button>
+      ${sellButton}
     </div>`;
   }).join("") : `<p class="palette-empty">未配置の設備はありません</p>`;
 
@@ -4259,23 +5195,22 @@ function renderShop() {
     </article>
   `;}).join("");
 
-  const hardwareCards = Object.entries(EQUIPMENT).map(([itemId, item]) => {
+  const hardwareCards = Object.entries(EQUIPMENT).filter(([itemId]) => itemId !== "support_robot").map(([itemId, item]) => {
     const available = isUnlocked("shop_item", itemId);
     const owned = (itemId === "filter" && state.equipment.filter) || (itemId === "fridge" && state.equipment.fridge);
     const nutrientFull = itemId === "nutrient" && state.nutrient >= state.nutrientCapacity;
-    const baseRestricted = Boolean(GROW_UNITS[itemId] && !currentBase().allowedUnits.includes(itemId));
     let price = item.basePrice;
     if (itemId === "water") price = waterPackPrice();
     if (GROW_UNITS[itemId]) price = growUnitPrice(itemId);
     const tags = (GROW_UNITS[itemId] || FLOOR_DEVICES[itemId]) ? unitTags(itemId) : [];
     const tagEffects = combinedEffects(tags, EQUIPMENT_TAGS);
     if (tags.length) price = Math.max(1, Math.round(price * (tagEffects.priceMod || 1)));
-    const disabled = !available || owned || nutrientFull || baseRestricted || state.money < price;
+    const disabled = !available || owned || nutrientFull || state.money < price;
     let count = "";
     if (itemId === "tank") count = ` x${state.equipment.tanks}`;
     if (GROW_UNITS[itemId]) count = ` x${unitCount(itemId)}`;
     if (FLOOR_DEVICES[itemId]) count = ` x${allFloorDevices().filter((device) => device.type === itemId).length}`;
-    return `<article class="shop-card ${available ? "" : "locked"} ${owned ? "owned" : ""} ${baseRestricted ? "restricted" : ""}" style="--item-color:${item.color}">
+    return `<article class="shop-card ${available ? "" : "locked"} ${owned ? "owned" : ""}" style="--item-color:${item.color}">
       ${owned ? `<span class="owned-tag">INSTALLED</span>` : ""}
       <div class="shop-glyph"><img src="${item.sprite || item.icon}" alt=""></div>
       <h3>${item.name}${count}</h3>
@@ -4283,7 +5218,7 @@ function renderShop() {
       ${tagMarkup(tags, EQUIPMENT_TAGS)}
       <footer>
         <span class="shop-price">₡${price}</span>
-        <button class="buy-button" data-buy-item="${itemId}" ${disabled ? "disabled" : ""}>${!available ? "LOCKED" : owned ? "OWNED" : baseRestricted ? "BASE LOCKED" : "BUY"}</button>
+        <button class="buy-button" data-buy-item="${itemId}" ${disabled ? "disabled" : ""}>${!available ? "LOCKED" : owned ? "OWNED" : "BUY"}</button>
       </footer>
     </article>`;
   }).join("");
@@ -4340,6 +5275,38 @@ function renderBroker() {
   }).join("");
 }
 
+function renderRadio() {
+  const summary = document.getElementById("radio-summary");
+  const noiseButton = document.getElementById("noise-cancel-toggle");
+  const noiseState = document.getElementById("noise-cancel-state");
+  const ambientList = document.getElementById("ambient-layer-list");
+  const radioList = document.getElementById("radio-program-list");
+  if (!summary || !noiseButton || !noiseState || !ambientList || !radioList) return;
+
+  const activeLayers = new Set(activeAmbientLayers().map(([id]) => id));
+  const radio = RADIO_PROGRAMS[state.audio.radioProgram] || RADIO_PROGRAMS.off;
+  summary.innerHTML = `<span>${state.audio.noiseCanceling ? "NOISE CANCELING" : `${activeLayers.size} AMBIENT LAYERS`}</span><strong>${radio?.name || "OFF"}</strong>`;
+  noiseButton.classList.toggle("active", state.audio.noiseCanceling);
+  noiseState.textContent = state.audio.noiseCanceling ? "ON" : "OFF";
+
+  ambientList.innerHTML = Object.entries(AMBIENT_LAYERS).map(([id, layer]) => {
+    const active = activeLayers.has(id);
+    return `<article class="ambient-layer ${active ? "active" : ""} ${state.audio.noiseCanceling ? "muted" : ""}">
+      <span>${active ? "LIVE" : "STANDBY"} // ${escapeHtml(layer.condition)}</span>
+      <strong>${escapeHtml(layer.label || id)}</strong>
+      <p>${escapeHtml(layer.description || "")}</p>
+    </article>`;
+  }).join("");
+
+  radioList.innerHTML = Object.entries(RADIO_PROGRAMS).filter(([, program]) => program.unlocked).map(([id, program]) => `
+    <button class="radio-program ${state.audio.radioProgram === id ? "active" : ""}" data-radio-program="${id}" type="button">
+      <span>${escapeHtml(program.kicker || "RADIO")}</span>
+      <strong>${escapeHtml(program.name || id)}</strong>
+      <p>${escapeHtml(program.description || "")}</p>
+    </button>
+  `).join("");
+}
+
 function render() {
   const cleaningNeeded = ownedBases().some((base) => [...base.shelves, ...base.floorDevices].some(needsCleaning));
   document.querySelector('[data-tab="farm"]')?.classList.toggle("needs-cleaning-tab", cleaningNeeded);
@@ -4354,7 +5321,9 @@ function render() {
   renderMarkets();
   renderShop();
   renderBroker();
+  renderRadio();
   renderTimeControl();
+  syncLoopAudio();
 }
 
 function renderRuntime() {
@@ -4367,7 +5336,9 @@ function renderRuntime() {
   } else {
     updateFarmProgress();
   }
+  if (document.getElementById("radio-screen")?.classList.contains("active")) renderRadio();
   renderTimeControl();
+  syncLoopAudio();
 }
 
 function updateFarmProgress() {
@@ -4458,16 +5429,30 @@ function bindEvents() {
       return;
     }
 
+    const noiseToggle = event.target.closest("#noise-cancel-toggle");
+    if (noiseToggle) {
+      event.preventDefault();
+      setNoiseCanceling(!state.audio.noiseCanceling);
+      return;
+    }
+
+    const radioProgram = event.target.closest("[data-radio-program]");
+    if (radioProgram) {
+      event.preventDefault();
+      selectRadioProgram(radioProgram.dataset.radioProgram);
+      return;
+    }
+
     const tab = event.target.closest(".tab");
     if (tab) {
-      playSound("click", 0.18);
       switchTab(tab.dataset.tab);
+      syncLoopAudio();
     }
 
     const seedOption = event.target.closest("[data-seed]");
     if (seedOption) {
       selectedSeed = seedOption.dataset.seed;
-      playSound("click", 0.16);
+      playSound("seed_select", 0.16);
       renderFarm();
     }
 
@@ -4517,6 +5502,11 @@ function bindEvents() {
       return;
     }
 
+    if (event.target.closest("[data-cancel-placement]")) {
+      cancelPlacementSelection();
+      return;
+    }
+
     const spriteEquipment = equipmentItemAtSpritePoint(event.clientX, event.clientY);
     const unitButton = spriteEquipment?.closest("[data-select-unit]") || event.target.closest("[data-select-unit]");
     if (unitButton) {
@@ -4534,6 +5524,10 @@ function bindEvents() {
     if (deviceButton) {
       if (!isOpaqueEquipmentPointer(deviceButton, event)) return;
       const device = currentFloorDevices().find((entry) => entry.id === deviceButton.dataset.selectDevice);
+      if (device?.type === "support_robot") {
+        triggerComms("support_robot_os_required");
+        return;
+      }
       if (device) setStatus(`${FLOOR_DEVICES[device.type].name}が低く唸っています。周囲の空気だけが少し違う速度で動いています。`);
       return;
     }
@@ -4561,22 +5555,6 @@ function bindEvents() {
 
     const contractButton = event.target.closest("[data-contract-property]");
     if (contractButton) contractProperty(contractButton.dataset.contractProperty);
-
-    const endingAccept = event.target.closest("[data-ending-accept]");
-    if (endingAccept) finishEnding(endingAccept.dataset.endingAccept);
-
-    const endingDecline = event.target.closest("[data-ending-decline]");
-    if (endingDecline) {
-      state.endingDeclined[endingDecline.dataset.endingDecline] = true;
-      state.paused = false;
-      document.getElementById("modal-backdrop").classList.add("hidden");
-      document.getElementById("modal-close").hidden = false;
-      setStatus(`${ENDING_DEFINITIONS[endingDecline.dataset.endingDecline].title}の契約を断りました。`);
-      checkFactionProgression();
-      saveGame();
-      render();
-    }
-
     const market = event.target.closest("[data-market]");
     if (market) {
       if (!isMarketAvailable(market.dataset.market)) {
@@ -4584,7 +5562,7 @@ function bindEvents() {
         return;
       }
       selectedMarket = market.dataset.market;
-      playSound("click", 0.18);
+      playSound("market_select", 0.18);
       renderMarkets();
     }
 
@@ -4982,14 +5960,14 @@ function bindEvents() {
       return;
     }
     if (event.key === "Escape" && placementSelection) {
-      placementSelection = null;
-      renderFarm();
+      cancelPlacementSelection();
       return;
     }
     if (event.key === "1") switchTab("farm");
     if (event.key === "2") switchTab("market");
     if (event.key === "3") switchTab("shop");
     if (event.key === "4") switchTab("broker");
+    if (event.key === "5") switchTab("radio");
   });
 }
 
@@ -5005,12 +5983,15 @@ function clearDragState() {
 }
 
 async function bootstrap() {
+  setBootLoadingProgress(0, 1, "CSVデータを読み込んでいます...");
   await loadExternalData();
+  await preloadBootAssets();
   startModeView = safeStorageGet(START_MODE_PREF_KEY) === "free" ? "free" : "day30";
   loadGame();
   bindEvents();
   render();
   openStartScreen({ persist: false });
+  hideBootLoading();
   window.setInterval(realtimeTick, 200);
 }
 

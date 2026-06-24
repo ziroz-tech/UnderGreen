@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=64">
+    <link rel="stylesheet" href="styles.css?v=105">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -20,7 +20,7 @@
         </div>
       </div>
       <div class="player-profile">
-        <img src="assets/characters/protagonist.webp" alt="主人公">
+        <img src="assets/characters/protagonist.png" alt="主人公">
         <div><small>ILLEGAL GROWER</small><strong>オペレーター</strong></div>
       </div>
       <div class="day-counter">
@@ -71,6 +71,7 @@
       <button class="tab" data-tab="market"><span>02</span>闇市場</button>
       <button class="tab" data-tab="shop"><span>03</span>調達端末</button>
       <button class="tab" data-tab="broker"><span>04</span>不動産ブローカー</button>
+      <button class="tab" data-tab="radio"><span>05</span>ラジオ</button>
     </nav>
 
     <main>
@@ -150,7 +151,7 @@
           <div class="heading-stats"><span>接続先</span><strong>廃棄区画 NODE-17</strong></div>
         </div>
         <div class="contact-panel broker-panel">
-          <img src="assets/characters/seed-broker.webp" alt="種ブローカーのマラ">
+          <img src="assets/characters/seed-broker.png" alt="種ブローカーのマラ">
           <div>
             <p class="eyebrow">ENCRYPTED VENDOR // MARA</p>
             <h3>種ブローカー「マラ」</h3>
@@ -186,6 +187,30 @@
           <button class="secondary-button" id="refresh-properties">物件を更新 ₡100</button>
         </div>
         <div class="property-grid" id="property-list"></div>
+      </section>
+
+      <section class="screen" id="radio-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">AUDIO CONSOLE</p>
+            <h2>ラジオ</h2>
+          </div>
+          <div class="heading-stats" id="radio-summary"></div>
+        </div>
+        <div class="radio-layout">
+          <section class="radio-console">
+            <div class="section-label"><span>NOISE CONTROL</span><small>環境音レイヤー</small></div>
+            <button class="noise-cancel-toggle" id="noise-cancel-toggle" type="button">
+              <span>NOISE CANCELING</span>
+              <strong id="noise-cancel-state">OFF</strong>
+            </button>
+            <div class="ambient-layer-list" id="ambient-layer-list"></div>
+          </section>
+          <section class="radio-console">
+            <div class="section-label"><span>RADIO CHANNELS</span><small>CSVで番組追加</small></div>
+            <div class="radio-program-list" id="radio-program-list"></div>
+          </section>
+        </div>
       </section>
     </main>
   </div>
@@ -238,7 +263,7 @@
 
   <aside class="comms-banner hidden" id="comms-banner" aria-live="polite">
     <div class="comms-speaker">
-      <img id="comms-icon" src="assets/characters/seed-broker.webp" alt="">
+      <img id="comms-icon" src="assets/characters/seed-broker.png" alt="">
       <div>
         <small id="comms-kicker">ENCRYPTED COMMS</small>
         <strong id="comms-speaker-name">---</strong>
@@ -281,7 +306,18 @@
     </section>
   </div>
 
+
+  <div class="boot-loading" id="boot-loading" role="status" aria-live="polite">
+    <div class="boot-loading-panel">
+      <p class="eyebrow">UNDERGREEN BOOT SEQUENCE</p>
+      <h2>素材を読み込んでいます</h2>
+      <p id="boot-loading-text">CSVデータを確認中...</p>
+      <div class="boot-loading-bar"><i id="boot-loading-fill"></i></div>
+      <small id="boot-loading-count">0%</small>
+    </div>
+  </div>
+
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=84"></script>
+  <script src="game.js?v=105"></script>
 </body>
 </html>
