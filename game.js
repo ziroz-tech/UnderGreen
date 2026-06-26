@@ -11,7 +11,10 @@ let GROW_UNITS = {};
 let GROW_UNIT_SLOT_LAYOUTS = {};
 let PLANT_STAGE_SPRITES = {};
 let AREA_PROFILES = {};
+let PROPERTY_COMMENTS = {};
 let FLOOR_DEVICES = {};
+let ROBOT_SKILLS = {};
+let ROBOT_PERSONALITIES = {};
 let EVENTS = [];
 let QUIET_NEWS = [];
 let EQUIPMENT = {};
@@ -20,6 +23,7 @@ let SOUND_VOLUMES = {};
 let AMBIENT_LAYERS = {};
 let RADIO_PROGRAMS = {};
 let UNLOCK_RULES = [];
+let SCHEDULE_RUMORS = [];
 
 const QUALITY = {
   C: { multiplier: 0.7, color: "#ff765e" },
@@ -58,8 +62,10 @@ const ISO_GRID_PAD_Y = 96;
 const FACILITY_ZOOM_MIN = 0.65;
 const FACILITY_ZOOM_MAX = 1.8;
 const FACILITY_ZOOM_STEP = 0.12;
+const FACILITY_INITIAL_ZOOM = 1.44;
 const SPRITE_ALPHA_THRESHOLD = 18;
 const BOOT_ASSET_TIMEOUT_MS = 20000;
+const AUDIO_CACHE_BUSTER = Date.now().toString(36);
 const spriteAlphaCache = new Map();
 let state;
 let selectedSeed = "lettuce";
@@ -80,7 +86,7 @@ let equipmentMenu = null;
 let equipmentMenuTimer = null;
 let cleanToolDrag = null;
 const facilityPointers = new Map();
-let facilityView = { x: 0, y: 0, zoom: 1 };
+let facilityView = { x: 0, y: 0, zoom: FACILITY_INITIAL_ZOOM };
 let suppressClickUntil = 0;
 let farmRenderRequested = false;
 let lastTickAt = Date.now();
@@ -97,7 +103,20 @@ let pendingExtraAction = null;
 let pausedBeforeStartScreen = false;
 let pendingDay30RecordId = null;
 let startModeView = "day30";
+let startTitleTapCount = 0;
+let startTitleTapAt = 0;
 const COMMS_DEDUPE_TRIGGERS = new Set(["plant_resource_shortage", "resource_low"]);
+
+const SCHEDULE_DAYS = 30;
+const SCHEDULE_REROLL_COST = 120;
+const SCHEDULE_NON_TARGET_SIGNAL_CAP = 0.42;
+const SUPPORT_ROBOT_DEFAULT_RANGE = 2;
+const SUPPORT_ROBOT_MIN_ENERGY = 8;
+const SUPPORT_ROBOT_MAX_ENERGY = 100;
+const SUPPORT_TASK_BASE_COOLDOWN = { harvest: 0.055, plant: 0.06, cleaning: 0.06, procure: 0.08, ship: 0.08 };
+const SUPPORT_TASK_BASE_COST = { harvest: 5, plant: 4, cleaning: 6, procure: 4, ship: 4 };
+const SUPPORT_TASKS = Object.keys(SUPPORT_TASK_BASE_COOLDOWN);
+const SUPPORT_GRADE_MULTIPLIER = { S: 1.35, A: 1.12, B: 1, C: 0.78 };
 
 function parseCsv(text) {
   const rows = [];
@@ -154,7 +173,8 @@ function toBool(value) {
 }
 
 function toList(value) {
-  return value ? value.split("|").map((entry) => entry.trim()).filter(Boolean) : [];
+  if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean);
+  return value ? String(value).split("|").map((entry) => entry.trim()).filter(Boolean) : [];
 }
 
 function toRange(value) {
@@ -238,6 +258,7 @@ async function loadExternalData() {
       color: row.color,
       note: row.note,
       unlock: row.unlock,
+      primaryMarket: row.unlock,
       category: row.category
     }));
   });
@@ -276,6 +297,25 @@ async function loadExternalData() {
       };
       return entries;
     }, {});
+  });
+  await loadRequiredCsv("data/schedule_rumors.csv", (rows) => {
+    SCHEDULE_RUMORS = rows.map((row) => ({
+      id: row.id,
+      type: row.type || "basic",
+      startDay: toNumber(row.startDay, 1),
+      duration: toNumber(row.duration, 1),
+      marketId: row.marketId,
+      axes: toList(row.axes || row.axis),
+      cropIds: toList(row.cropIds || row.crops),
+      strength: row.strength || "mid",
+      chance: toNumber(row.chance, row.type === "rare" ? 0.45 : 1),
+      jitter: toNumber(row.jitter, row.type === "rare" ? 2 : 0),
+      signalBoost: toNumber(row.signalBoost, 0),
+      priceBoost: toNumber(row.priceBoost, 0),
+      title: row.title,
+      rumor: row.rumor,
+      comment: row.comment
+    })).filter((entry) => entry.id && entry.marketId && entry.axes.length);
   });
   await loadRequiredCsv("data/plant_sprites.csv", (rows) => {
     PLANT_STAGE_SPRITES = rows.reduce((entries, row) => {
@@ -350,6 +390,26 @@ async function loadExternalData() {
       color: row.color
     }));
   });
+  await loadRequiredCsv("data/support_robot_skills.csv", (rows) => {
+    ROBOT_SKILLS = rowsToObject(rows, (row) => ({
+      name: row.name,
+      harvest: row.harvest || "B",
+      plant: row.plant || row.planting || "B",
+      cleaning: row.cleaning || row.clean || "B",
+      procure: row.procure || "B",
+      ship: row.ship || "B",
+      description: row.description
+    }));
+  });
+  await loadRequiredCsv("data/support_robot_personalities.csv", (rows) => {
+    ROBOT_PERSONALITIES = rowsToObject(rows, (row) => ({
+      name: row.name,
+      rangeMod: toNumber(row.rangeMod, 1),
+      fuelMod: toNumber(row.fuelMod, 1),
+      speedMod: toNumber(row.speedMod, 1),
+      description: row.description
+    }));
+  });
   await loadRequiredCsv("data/equipment.csv", (rows) => {
     EQUIPMENT = rowsToObject(rows, (row) => ({
       name: row.name,
@@ -383,6 +443,15 @@ async function loadExternalData() {
       allowedUnits: toList(row.allowedUnits),
       traits: toList(row.traits)
     }));
+  });
+  await loadRequiredCsv("data/property_comments.csv", (rows) => {
+    PROPERTY_COMMENTS = rows.reduce((entries, row) => {
+      const tier = row.tier || "drainage";
+      entries[tier] ||= { lines: [], saleSuffix: "" };
+      if (row.line) entries[tier].lines.push(row.line);
+      if (row.saleSuffix) entries[tier].saleSuffix = row.saleSuffix;
+      return entries;
+    }, {});
   });
   await loadRequiredCsv("data/events.csv", (rows) => {
     EVENTS = rows.map((row) => ({
@@ -518,12 +587,7 @@ function preloadImageAsset(url, timeoutMs = BOOT_ASSET_TIMEOUT_MS) {
     };
     const timer = window.setTimeout(() => finish(new Error(`Image timed out: ${url}`)), timeoutMs);
     image.decoding = "async";
-    image.onload = async () => {
-      try {
-        if (image.decode) await image.decode();
-      } catch (error) {}
-      finish();
-    };
+    image.onload = () => finish();
     image.onerror = () => finish(new Error(`Image failed to load: ${url}`));
     image.src = url;
     if (image.complete && image.naturalWidth > 0) image.onload();
@@ -534,22 +598,29 @@ async function preloadBootAssets() {
   const urls = collectBootImageAssets();
   const failures = [];
   let done = 0;
-  setBootLoadingProgress(done, urls.length, "\u753b\u50cf\u7d20\u6750\u3092\u78ba\u8a8d\u3057\u3066\u3044\u307e\u3059...");
-  for (const url of urls) {
-    setBootLoadingProgress(done, urls.length, `\u8aad\u307f\u8fbc\u307f\u4e2d (${done + 1}/${urls.length}): ${url}`);
-    try {
-      await preloadImageAsset(url);
-    } catch (error) {
-      failures.push({ url, message: error.message });
-      console.warn("Boot image preload skipped", url, error);
+  let nextIndex = 0;
+  const workerCount = Math.min(6, Math.max(1, urls.length));
+  setBootLoadingProgress(done, urls.length, "画像素材を確認しています...");
+  async function preloadNext() {
+    while (nextIndex < urls.length) {
+      const currentIndex = nextIndex;
+      const url = urls[currentIndex];
+      nextIndex += 1;
+      setBootLoadingProgress(done, urls.length, `読み込み中 (${Math.min(done + 1, urls.length)}/${urls.length}): ${url}`);
+      try {
+        await preloadImageAsset(url);
+      } catch (error) {
+        failures.push({ url, message: error.message });
+        console.warn("Boot image preload skipped", url, error);
+      }
+      done += 1;
+      setBootLoadingProgress(done, urls.length, `確認済み (${done}/${urls.length}): ${url}`);
     }
-    done += 1;
-    setBootLoadingProgress(done, urls.length, `\u78ba\u8a8d\u6e08\u307f (${done}/${urls.length}): ${url}`);
   }
+  await Promise.all(Array.from({ length: workerCount }, preloadNext));
   window.BOOT_ASSET_FAILURES = failures;
   if (failures.length) console.warn("Boot image preload completed with missing assets", failures);
 }
-
 function applyUiText(rows) {
   rows.forEach((row) => {
     UI_TEXT[row.key] = row.text;
@@ -866,6 +937,20 @@ function createAnalyticsSummary() {
   };
 }
 
+function createDefaultSupportAutomation() {
+  return {
+    procurement: {
+      selectedCropId: "lettuce",
+      byCrop: Object.fromEntries(Object.keys(CROPS).map((cropId) => [cropId, { enabled: false, packs: 1 }]))
+    },
+    planting: { enabled: false, cropId: "lettuce" },
+    shipping: {
+      selectedCropId: "lettuce",
+      byCrop: Object.fromEntries(Object.keys(CROPS).map((cropId) => [cropId, { enabled: false, marketId: "lower", qty: 1 }]))
+    }
+  };
+}
+
 function createInitialState(mode = "normal") {
   const initialProperty = createInitialSafeRoom();
   initialProperty.ownedAt = Date.now();
@@ -889,6 +974,8 @@ function createInitialState(mode = "normal") {
     unlocks: {},
     inventory: [],
     equipment: { tanks: 0, filter: false, fridge: false },
+    supportOS: { harvest: false, planting: false, cleaning: false },
+    automation: createDefaultSupportAutomation(),
     resourceRemainders: { water: 0, nutrient: 0 },
     dayProgress: 0,
     paused: false,
@@ -896,6 +983,7 @@ function createInitialState(mode = "normal") {
     marketFluctuation: {},
     marketSignals: {},
     marketEventQueue: [],
+    monthlySchedule: generateMonthlySchedule(),
     nextMarketForecastDay: 3,
     newsHistory: [],
     tradeStats: {
@@ -1065,36 +1153,10 @@ function usableCellCount(base) {
 }
 
 function propertyFlavorDescription(property, onSale = property.onSale) {
-  const lines = {
-    safe_room: [
-      "Kido: A lower-district safe room. Tiny, quiet, and just wide enough to start.",
-      "Kido: Three by two. No comfort, no witnesses, enough floor for your first green.",
-      "Kido: Keep the PODs tight. Bigger rooms come after you prove the hands."
-    ],
-    drainage: [
-      "Kido: Low ceiling, good water noise. Fine for hiding your first green.",
-      "Kido: Patrols look up. Down here, quiet hands live longer.",
-      "Kido: Small boxes, short routes. Keep the farm close to your hands."
-    ],
-    tunnel: [
-      "Kido: Power still runs. The floor is narrow, but it will carry weight.",
-      "Kido: Maintenance crews slept in spaces like this. You can grow something quieter.",
-      "Kido: Boxes will fit if you keep the noise under the duct hum."
-    ],
-    freight: [
-      "Kido: The loading mouth remains. Heavy gear moves easier here.",
-      "Kido: Enough room to get greedy. That is the real hazard.",
-      "Kido: Corporate space erased from old ledgers always has a story."
-    ],
-    station: [
-      "Kido: The line is dead, but the trunk is warm. Big farms start here.",
-      "Kido: Empty platforms remember crowds. Fans will disappear into the echo.",
-      "Kido: Upkeep bites. Scale costs blood before it pays credits."
-    ]
-  };
-  const pool = lines[property.tier] || lines.drainage;
+  const comments = PROPERTY_COMMENTS[property.tier] || PROPERTY_COMMENTS.drainage || { lines: [] };
+  const pool = comments.lines && comments.lines.length ? comments.lines : ["Kido: No comment filed for this property. Check the preview."];
   const baseLine = pool[Math.abs(hashString(property.id || property.name || property.code)) % pool.length];
-  return onSale ? `${baseLine} Sale signs mean holes in the floor plan. Check the preview.` : baseLine;
+  return onSale ? baseLine + (comments.saleSuffix || "") : baseLine;
 }
 
 function hashString(value) {
@@ -1149,6 +1211,7 @@ function generatePropertyListings(count = PROPERTY_LISTING_COUNT) {
 
 function ensureMarketNewsState() {
   state.marketEventQueue = Array.isArray(state.marketEventQueue) ? state.marketEventQueue : [];
+  state.monthlySchedule = ensureMonthlyScheduleBasics(Array.isArray(state.monthlySchedule) && state.monthlySchedule.length ? state.monthlySchedule : generateMonthlySchedule());
   state.newsHistory = Array.isArray(state.newsHistory) ? state.newsHistory : [];
   if (!Number.isFinite(Number(state.nextMarketForecastDay))) {
     state.nextMarketForecastDay = Math.max(3, (Number(state.day) || 1) + 2);
@@ -1223,6 +1286,7 @@ function updateMarketForDay() {
       [profile.axisB]: randomBetween(0.18, 0.94)
     };
   });
+  applyScheduleMarketSignals();
 
   state.marketEventQueue = state.marketEventQueue.filter((schedule) =>
     marketEventById(schedule.eventId) && state.day < schedule.endDay + 2
@@ -1482,6 +1546,11 @@ function repairPlayableState() {
     }
   });
   state.inventory ||= [];
+  state.inventory = state.inventory.map((item) => ({
+    ...item,
+    qty: Math.max(0, Number(item.qty) || 0),
+    age: Math.max(0, Number(item.age) || 0)
+  })).filter((item) => item.qty > 0);
   state.equipment ||= { tanks: 0, filter: false, fridge: false };
   state.resourceRemainders ||= { water: 0, nutrient: 0 };
   state.water = Number.isFinite(Number(state.water)) ? Number(state.water) : 20;
@@ -1536,8 +1605,10 @@ function loadGame() {
   state.marketSignals ||= {};
   state.audio ||= {};
   state.audio.noiseCanceling = Boolean(state.audio.noiseCanceling);
+  ensureSupportAutomationState();
   if (!RADIO_PROGRAMS[state.audio.radioProgram]) state.audio.radioProgram = "off";
   state.marketEventQueue = Array.isArray(state.marketEventQueue) ? state.marketEventQueue : [];
+  state.monthlySchedule = ensureMonthlyScheduleBasics(Array.isArray(state.monthlySchedule) && state.monthlySchedule.length ? state.monthlySchedule : generateMonthlySchedule());
   state.newsHistory = Array.isArray(state.newsHistory) ? state.newsHistory : [];
   if (!Number.isFinite(Number(state.nextMarketForecastDay))) {
     state.nextMarketForecastDay = Math.max(3, (Number(state.day) || 1) + 2);
@@ -1557,6 +1628,7 @@ function loadGame() {
   if (!isMarketAvailable(selectedMarket)) selectedMarket = "lower";
   const hasLegacyImmediateEvent = state.event && !state.marketEventQueue.length;
   if (!state.news || !Object.keys(state.marketSignals).length || hasLegacyImmediateEvent) updateMarketForDay();
+  applyScheduleMarketSignals();
   if (loaded.sourceKey && loaded.sourceKey !== SAVE_KEY) saveGame();
 }
 
@@ -1580,6 +1652,7 @@ function normalizeBase(base) {
     item.tags ||= [];
     item.dirt ||= 0;
   });
+  base.floorDevices.forEach(ensureSupportRobotProfile);
   return base;
 }
 
@@ -1708,8 +1781,194 @@ function allPlacedObjects() {
   ];
 }
 
+function randomRecordId(record, fallback = "") {
+  const ids = Object.keys(record || {});
+  if (!ids.length) return fallback;
+  return ids[Math.floor(Math.random() * ids.length)] || fallback;
+}
+
+function ensureSupportRobotProfile(device) {
+  if (!device || device.type !== "support_robot") return device;
+  if (!ROBOT_SKILLS[device.robotSkillId]) device.robotSkillId = randomRecordId(ROBOT_SKILLS, "balanced");
+  if (!ROBOT_PERSONALITIES[device.robotPersonalityId]) device.robotPersonalityId = randomRecordId(ROBOT_PERSONALITIES, "steady");
+  if (!Number.isFinite(Number(device.supportEnergy))) device.supportEnergy = SUPPORT_ROBOT_MAX_ENERGY;
+  const legacyCooldown = Number.isFinite(Number(device.supportCooldown)) ? Number(device.supportCooldown) : 0;
+  const previousCooldowns = device.supportTaskCooldowns || {};
+  device.supportTaskCooldowns = {};
+  SUPPORT_TASKS.forEach((task) => {
+    const value = Number(previousCooldowns[task]);
+    device.supportTaskCooldowns[task] = Number.isFinite(value) ? Math.max(0, value) : Math.max(0, legacyCooldown);
+  });
+  device.supportCooldown = Math.max(0, ...Object.values(device.supportTaskCooldowns));
+  const harvestSource = device.harvestAutomation || device.automation?.harvest || {};
+  device.harvestAutomation = {
+    enabled: harvestSource.enabled !== false
+  };
+  const plantingSource = device.plantingAutomation || device.automation?.planting || {};
+  device.plantingAutomation = {
+    enabled: Boolean(plantingSource.enabled),
+    cropId: CROPS[plantingSource.cropId] ? plantingSource.cropId : "lettuce"
+  };
+  return device;
+}
+
+function createFloorDevice(type) {
+  const device = { id: makeId("device"), type, placed: false, x: null, y: null, tags: unitTags(type), dirt: 0 };
+  ensureSupportRobotProfile(device);
+  return device;
+}
+
+function normalizedCropAutomationEntry(source = {}, defaults = {}) {
+  return {
+    enabled: Boolean(source.enabled),
+    packs: Math.max(1, Math.min(12, Math.round(Number(source.packs ?? defaults.packs ?? 1))))
+  };
+}
+
+function normalizedShipAutomationEntry(source = {}, defaults = {}) {
+  const marketId = MARKETS[source.marketId] ? source.marketId : (MARKETS[defaults.marketId] ? defaults.marketId : "lower");
+  return {
+    enabled: Boolean(source.enabled),
+    marketId,
+    qty: Math.max(1, Math.min(99, Math.round(Number(source.qty ?? defaults.qty ?? 1))))
+  };
+}
+
+function ensureSupportAutomationState() {
+  const previous = state.automation || {};
+  const legacyProcCrop = CROPS[previous.procurement?.cropId] ? previous.procurement.cropId : "lettuce";
+  const legacyShipCrop = CROPS[previous.shipping?.cropId] ? previous.shipping.cropId : "lettuce";
+  state.supportOS = {
+    harvest: Boolean(state.supportOS?.harvest),
+    planting: Boolean(state.supportOS?.planting),
+    cleaning: Boolean(state.supportOS?.cleaning)
+  };
+  state.automation = {
+    procurement: {
+      selectedCropId: CROPS[previous.procurement?.selectedCropId] ? previous.procurement.selectedCropId : legacyProcCrop,
+      byCrop: {}
+    },
+    planting: {
+      enabled: Boolean(previous.planting?.enabled),
+      cropId: CROPS[previous.planting?.cropId] ? previous.planting.cropId : legacyProcCrop
+    },
+    shipping: {
+      selectedCropId: CROPS[previous.shipping?.selectedCropId] ? previous.shipping.selectedCropId : legacyShipCrop,
+      byCrop: {}
+    }
+  };
+  Object.keys(CROPS).forEach((cropId) => {
+    const procSource = previous.procurement?.byCrop?.[cropId]
+      || (cropId === legacyProcCrop ? previous.procurement : {});
+    state.automation.procurement.byCrop[cropId] = normalizedCropAutomationEntry(procSource, { packs: 1 });
+    const shipSource = previous.shipping?.byCrop?.[cropId]
+      || (cropId === legacyShipCrop ? previous.shipping : {});
+    state.automation.shipping.byCrop[cropId] = normalizedShipAutomationEntry(shipSource, { marketId: "lower", qty: 1 });
+  });
+  if (state.bases) {
+    const legacyPlanting = previous.planting || {};
+    const legacyPlantingCropId = CROPS[legacyPlanting.cropId] ? legacyPlanting.cropId : legacyProcCrop;
+    state.bases.forEach((base) => base.floorDevices?.forEach((device) => {
+      ensureSupportRobotProfile(device);
+      if (device.type === "support_robot" && legacyPlanting.enabled && !device.plantingAutomation.enabled) {
+        device.plantingAutomation = { enabled: true, cropId: legacyPlantingCropId };
+      }
+    }));
+  }
+}
+function supportRobotSkill(device) {
+  ensureSupportRobotProfile(device);
+  return ROBOT_SKILLS[device.robotSkillId] || ROBOT_SKILLS.balanced || { name: "Balanced", harvest: "B", plant: "B", cleaning: "B", procure: "B", ship: "B" };
+}
+
+function supportRobotPersonality(device) {
+  ensureSupportRobotProfile(device);
+  return ROBOT_PERSONALITIES[device.robotPersonalityId] || ROBOT_PERSONALITIES.steady || { name: "Steady", rangeMod: 1, fuelMod: 1, speedMod: 1 };
+}
+
+function supportTaskGrade(device, task) {
+  return String(supportRobotSkill(device)[task] || "B").toUpperCase();
+}
+
+function supportTaskMultiplier(device, task) {
+  return SUPPORT_GRADE_MULTIPLIER[supportTaskGrade(device, task)] || 1;
+}
+
+function supportRobotRange(device) {
+  const baseRange = Number(FLOOR_DEVICES.support_robot?.radius) || SUPPORT_ROBOT_DEFAULT_RANGE;
+  const personality = supportRobotPersonality(device);
+  return Math.max(1, Math.round(baseRange * (Number(personality.rangeMod) || 1)));
+}
+
+function supportRobotCooldownDays(device, task) {
+  const personality = supportRobotPersonality(device);
+  const speed = (Number(personality.speedMod) || 1) * supportTaskMultiplier(device, task);
+  return (SUPPORT_TASK_BASE_COOLDOWN[task] || 0.08) / Math.max(0.25, speed);
+}
+
+function supportRobotEnergyCost(device, task) {
+  const personality = supportRobotPersonality(device);
+  const grade = supportTaskMultiplier(device, task);
+  return Math.max(1, (SUPPORT_TASK_BASE_COST[task] || 4) * (Number(personality.fuelMod) || 1) / Math.max(0.45, grade));
+}
+
+function itemGridCenter(item, kind) {
+  const size = footprint({ ...item, kind });
+  return { x: item.x + (size.width - 1) / 2, y: item.y + (size.height - 1) / 2 };
+}
+
+function supportRobotCanReach(robot, item, kind) {
+  if (!robot?.placed || !item?.placed) return false;
+  const center = itemGridCenter(item, kind);
+  return Math.max(Math.abs(center.x - robot.x), Math.abs(center.y - robot.y)) <= supportRobotRange(robot);
+}
+
+function refreshSupportRobotCooldown(robot) {
+  ensureSupportRobotProfile(robot);
+  robot.supportCooldown = Math.max(0, ...Object.values(robot.supportTaskCooldowns || {}));
+}
+
+function tickSupportRobotCooldowns(robot, deltaDays) {
+  ensureSupportRobotProfile(robot);
+  SUPPORT_TASKS.forEach((task) => {
+    robot.supportTaskCooldowns[task] = Math.max(0, (Number(robot.supportTaskCooldowns[task]) || 0) - deltaDays);
+  });
+  refreshSupportRobotCooldown(robot);
+}
+
+function supportRobotTaskReady(robot, task) {
+  ensureSupportRobotProfile(robot);
+  return (Number(robot.supportCooldown) || 0) <= 0
+    && (Number(robot.supportTaskCooldowns?.[task]) || 0) <= 0
+    && (Number(robot.supportEnergy) || 0) >= SUPPORT_ROBOT_MIN_ENERGY
+    && (Number(robot.supportEnergy) || 0) >= supportRobotEnergyCost(robot, task);
+}
+
+function spendSupportRobotAction(robot, task) {
+  ensureSupportRobotProfile(robot);
+  robot.supportEnergy = Math.max(0, (Number(robot.supportEnergy) || 0) - supportRobotEnergyCost(robot, task));
+  const cooldown = supportRobotCooldownDays(robot, task);
+  SUPPORT_TASKS.forEach((entryTask) => {
+    robot.supportTaskCooldowns[entryTask] = cooldown;
+  });
+  refreshSupportRobotCooldown(robot);
+}
+
 function supportRobotExists() {
   return ownedBases().some((base) => base.floorDevices?.some((device) => device.type === "support_robot"));
+}
+
+
+function hasAnySupportOS() {
+  return Boolean(state.supportOS?.harvest || state.supportOS?.planting || state.supportOS?.cleaning);
+}
+
+function findSupportRobotById(robotId) {
+  for (const base of ownedBases()) {
+    const robot = base.floorDevices?.find((device) => device.id === robotId && device.type === "support_robot");
+    if (robot) return robot;
+  }
+  return null;
 }
 
 function preferredSupportRobotPosition(base, item) {
@@ -1738,7 +1997,7 @@ function grantFloorDevice(type) {
     }
     state.supportRobotGranted = true;
   }
-  const device = { id: makeId("device"), type, placed: false, x: null, y: null, tags: unitTags(type), dirt: 0 };
+  const device = createFloorDevice(type);
   currentFloorDevices().push(device);
   const item = { ...device, kind: "device" };
   const position = preferredSupportRobotPosition(currentBase(), item);
@@ -1761,9 +2020,10 @@ function footprint(item) {
 
 function equipmentVisualDepth(item, kind) {
   const size = footprint({ ...item, kind });
-  const frontX = item.x + size.width - 1;
-  const frontY = item.y + size.height - 1;
-  return (frontX + frontY) * 20 + frontY;
+  const anchorX = item.x + (size.width - 1) / 2;
+  const anchorY = item.y + size.height - 1;
+  const footprintBias = Math.max(0, size.width - 1) * 0.35;
+  return Math.round((anchorX + anchorY) * 100 + anchorY * 10 - footprintBias);
 }
 
 function canPlace(item, x, y, ignoreId = null) {
@@ -1903,10 +2163,18 @@ function cropEventMultiplier(cropId) {
   return (state.event.allCropMod || 1) * ((state.event.cropMods && state.event.cropMods[cropId]) || 1);
 }
 
+function cropPrimaryMarket(cropId) {
+  return CROPS[cropId]?.primaryMarket || CROPS[cropId]?.unlock || "lower";
+}
+
+function isMarketSpecialty(cropId, marketId) {
+  return cropPrimaryMarket(cropId) === marketId;
+}
+
 function cropDemandMultiplier(cropId, marketId = selectedMarket) {
   const profile = MARKET_SIGNALS[marketId];
   const response = CROP_MARKET_RESPONSE[marketId]?.[cropId];
-  if (!profile || !response) return 1;
+  if (!profile || !response || !isMarketSpecialty(cropId, marketId)) return 1;
   const signals = state.marketSignals?.[marketId] || {};
   const axisA = signals[profile.axisA] ?? 0.5;
   const axisB = signals[profile.axisB] ?? 0.5;
@@ -1919,27 +2187,303 @@ function cropDemandMultiplier(cropId, marketId = selectedMarket) {
 }
 
 function cropDemandNote(cropId, marketId = selectedMarket) {
-  return CROP_MARKET_RESPONSE[marketId]?.[cropId]?.note || "";
+  if (!isMarketSpecialty(cropId, marketId)) {
+    if (marketId === "rebel") return "下層市場基準の1.5倍で固定";
+    if (marketId !== "medical" && marketId !== "lower") return "下層市場基準の半額で固定";
+    if (marketId === "medical") return "医療需要の影響なし";
+  }
+  const note = CROP_MARKET_RESPONSE[marketId]?.[cropId]?.note || "";
+  return scheduleCropEventMultiplier(cropId, marketId) > 1
+    ? (note ? `${note} / LOWNET噂補正` : "LOWNET噂補正")
+    : note;
 }
 
-function getUnitPrice(batch, marketId = selectedMarket) {
+
+function scheduleClampDay(day) {
+  return Math.max(1, Math.min(SCHEDULE_DAYS, Math.round(Number(day) || 1)));
+}
+
+function scheduleJitterDay(day, range = 2) {
+  return scheduleClampDay(day + Math.floor(Math.random() * (range * 2 + 1)) - range);
+}
+
+function scheduleRumorDefinitions(type = "basic") {
+  return SCHEDULE_RUMORS.filter((entry) => (entry.type || "basic") === type);
+}
+
+function scheduleDefinition(entryId) {
+  return SCHEDULE_RUMORS.find((entry) => entry.id === entryId) || null;
+}
+
+function normalizeScheduleEntry(entry = {}) {
+  const definition = scheduleDefinition(entry.id);
+  const merged = definition ? { ...entry, ...definition } : { ...entry };
+  if (definition && (definition.type || "basic") === "rare" && Number.isFinite(Number(entry.startDay))) {
+    merged.startDay = Number(entry.startDay);
+  }
+  merged.type ||= "basic";
+  merged.axes = Array.isArray(merged.axes) ? merged.axes : toList(merged.axes || merged.axis);
+  merged.cropIds = Array.isArray(merged.cropIds) ? merged.cropIds : toList(merged.cropIds || merged.crops || merged.cropId);
+  merged.startDay = scheduleClampDay(merged.startDay);
+  merged.duration = Math.max(1, Math.round(Number(merged.duration) || 1));
+  merged.chance = Number.isFinite(Number(merged.chance)) ? Number(merged.chance) : (merged.type === "rare" ? 0.45 : 1);
+  merged.jitter = Math.max(0, Math.round(Number(merged.jitter) || 0));
+  merged.signalBoost = Number.isFinite(Number(merged.signalBoost)) ? Number(merged.signalBoost) : 0;
+  merged.priceBoost = Number.isFinite(Number(merged.priceBoost)) ? Number(merged.priceBoost) : 0;
+  return merged;
+}
+
+function ensureMonthlyScheduleBasics(schedule = []) {
+  const knownIds = new Set(SCHEDULE_RUMORS.map((entry) => entry.id));
+  const entries = (Array.isArray(schedule) ? schedule : [])
+    .map(normalizeScheduleEntry)
+    .filter((entry) => entry.id && knownIds.has(entry.id));
+  const seen = new Set(entries.map((entry) => entry.id));
+  scheduleRumorDefinitions("basic").forEach((entry) => {
+    if (!seen.has(entry.id)) entries.push(normalizeScheduleEntry({ ...entry, certainty: "known" }));
+  });
+  return entries.sort((a, b) => a.startDay - b.startDay || String(a.id).localeCompare(String(b.id)));
+}
+
+function generateMonthlySchedule() {
+  const entries = scheduleRumorDefinitions("basic").map((entry) => normalizeScheduleEntry({ ...entry, certainty: "known" }));
+  scheduleRumorDefinitions("rare").forEach((entry) => {
+    const chance = Number.isFinite(Number(entry.chance)) ? Number(entry.chance) : 0.45;
+    if (Math.random() < chance) {
+      entries.push(normalizeScheduleEntry({ ...entry, startDay: scheduleJitterDay(entry.startDay, entry.jitter || 2), certainty: "rumor" }));
+    }
+  });
+  if (entries.length > 5 && !entries.some((entry, index) => entries.some((other, otherIndex) => otherIndex !== index && scheduleEntryDays(other).includes(entry.startDay)))) {
+    entries[entries.length - 1].startDay = entries[1].startDay;
+  }
+  return ensureMonthlyScheduleBasics(entries);
+}
+
+function scheduleEntryDays(entry) {
+  return Array.from({ length: Math.max(1, Number(entry.duration) || 1) }, (_, index) => Number(entry.startDay) + index).filter((day) => day >= 1 && day <= SCHEDULE_DAYS);
+}
+
+function scheduleEntriesForDay(day) {
+  return (state.monthlySchedule || []).map(normalizeScheduleEntry).filter((entry) => scheduleEntryDays(entry).includes(day));
+}
+
+function scheduleSignalBoost(entry) {
+  if (Number(entry.signalBoost) > 0) return clamp(Number(entry.signalBoost), 0, 1);
+  if (entry.strength === "rare") return 0.94;
+  if (entry.strength === "high") return 0.9;
+  return 0.84;
+}
+
+function schedulePriceBoost(entry) {
+  if (Number(entry.priceBoost) > 0) return Math.max(1, Number(entry.priceBoost));
+  if (entry.strength === "rare") return 1.65;
+  if (entry.strength === "high") return 1.8;
+  return 1.55;
+}
+
+function scheduleCropEventMultiplier(cropId, marketId = selectedMarket) {
+  return activeScheduleEntries()
+    .filter((entry) => entry.marketId === marketId && scheduleCropIds(entry).includes(cropId))
+    .reduce((multiplier, entry) => Math.max(multiplier, schedulePriceBoost(entry)), 1);
+}
+
+function activeScheduleEntries(day = state.day) {
+  return scheduleEntriesForDay(Number(day) || 1);
+}
+
+function applyScheduleMarketSignals() {
+  const activeEntries = activeScheduleEntries();
+  const targetedAxesByMarket = new Map();
+  activeEntries.forEach((entry) => {
+    const signals = state.marketSignals?.[entry.marketId];
+    if (!signals) return;
+    const boost = scheduleSignalBoost(entry);
+    const targetedAxes = targetedAxesByMarket.get(entry.marketId) || new Set();
+    scheduleAxisList(entry).forEach((axis) => {
+      if (!axis || !(axis in signals)) return;
+      targetedAxes.add(axis);
+      signals[axis] = clamp(Math.max(Number(signals[axis]) || 0, boost), 0, 0.98);
+    });
+    targetedAxesByMarket.set(entry.marketId, targetedAxes);
+  });
+
+  targetedAxesByMarket.forEach((targetedAxes, marketId) => {
+    const profile = MARKET_SIGNALS[marketId];
+    const signals = state.marketSignals?.[marketId];
+    if (!profile || !signals) return;
+    [profile.axisA, profile.axisB].forEach((axis) => {
+      if (!axis || targetedAxes.has(axis) || !(axis in signals)) return;
+      signals[axis] = clamp(Math.min(Number(signals[axis]) || 0, SCHEDULE_NON_TARGET_SIGNAL_CAP), 0, 1);
+    });
+  });
+}
+
+function scheduleAxisList(entry) {
+  return Array.isArray(entry?.axes) ? entry.axes : toList(entry?.axes || entry?.axis);
+}
+
+function scheduleCropIds(entry) {
+  return Array.isArray(entry?.cropIds) ? entry.cropIds : toList(entry?.cropIds || entry?.crops || entry?.cropId);
+}
+
+function marketAxisLabels(marketId, axes) {
+  const profile = MARKET_SIGNALS[marketId];
+  return toList(axes).map((axis) => {
+    if (!profile) return axis || "---";
+    if (profile.axisA === axis) return profile.axisALabel;
+    if (profile.axisB === axis) return profile.axisBLabel;
+    return axis || "---";
+  }).filter(Boolean);
+}
+
+function marketAxisLabel(marketId, axis) {
+  return marketAxisLabels(marketId, axis).join(" / ") || "---";
+}
+
+function scheduleCropLabel(entry) {
+  const names = scheduleCropIds(entry).map((cropId) => CROPS[cropId]?.name || cropId).filter(Boolean);
+  return names.length ? names.join(" / ") : "---";
+}
+
+function scheduleMarketLabel(entry) {
+  return MARKETS[entry.marketId]?.name || entry.marketId || "---";
+}
+
+function scheduleStrengthLabel(strength) {
+  if (strength === "rare") return "RARE";
+  if (strength === "high") return "HIGH";
+  return "WATCH";
+}
+
+
+function findScheduleEntry(entryId) {
+  const entry = (state.monthlySchedule || []).find((candidate) => candidate.id === entryId) || null;
+  return entry ? normalizeScheduleEntry(entry) : null;
+}
+
+function scheduleDayRange(entry) {
+  const endDay = Number(entry.startDay) + Math.max(1, Number(entry.duration) || 1) - 1;
+  return "DAY " + String(entry.startDay).padStart(2, "0") + (endDay !== Number(entry.startDay) ? "-" + String(endDay).padStart(2, "0") : "");
+}
+
+function scheduleDetailMarkup(entry) {
+  const axisLabel = marketAxisLabel(entry.marketId, scheduleAxisList(entry));
+  return '<div class="schedule-detail-card ' + (entry.strength || 'mid') + '">'
+    + '<div class="schedule-detail-meta"><span>' + escapeHtml(scheduleDayRange(entry)) + '</span><strong>' + escapeHtml(scheduleStrengthLabel(entry.strength)) + '</strong></div>'
+    + '<p class="schedule-detail-rumor">' + escapeHtml(entry.rumor) + '</p>'
+    + '<dl><dt>CROP</dt><dd>' + escapeHtml(scheduleCropLabel(entry)) + '</dd><dt>MARKET</dt><dd>' + escapeHtml(scheduleMarketLabel(entry)) + '</dd><dt>SIGNAL</dt><dd>' + escapeHtml(axisLabel) + '</dd></dl>'
+    + '<blockquote>' + escapeHtml(entry.comment) + '</blockquote>'
+    + '</div>';
+}
+
+function showScheduleEntryDetail(entryId, sourceElement = null) {
+  const entry = findScheduleEntry(entryId);
+  if (!entry) return;
+  if (sourceElement) {
+    sourceElement.classList.remove("schedule-chip-pulse");
+    void sourceElement.offsetWidth;
+    sourceElement.classList.add("schedule-chip-pulse");
+  }
+  playSound("tab_switch", 0.12);
+  window.setTimeout(() => {
+    showModal("LOWNET RUMOR", entry.title, scheduleDetailMarkup(entry), true);
+    document.getElementById("modal-reset").style.display = "none";
+  }, 170);
+}
+
+function rerollMonthlySchedule() {
+  if (state.money < SCHEDULE_REROLL_COST) {
+    toast("Credits insufficient for reinvestigation.", "warning");
+    rejectFeedback();
+    return;
+  }
+  state.money -= SCHEDULE_REROLL_COST;
+  state.monthlySchedule = generateMonthlySchedule();
+  applyScheduleMarketSignals();
+  state.log = "LOWNET rumors reinvestigated. Monthly schedule updated.";
+  playSound("market_select", 0.22);
+  saveGame();
+  render();
+}
+
+function requestScheduleReroll() {
+  openConfirmWidget({
+    kicker: "LOWNET RECHECK",
+    title: "\u518d\u8abf\u67fb",
+    copy: "\u20a1" + SCHEDULE_REROLL_COST + "\u3092\u652f\u6255\u3044\u3001\u6708\u9593\u30b9\u30b1\u30b8\u30e5\u30fc\u30eb\u306e\u5642\u3092\u518d\u8abf\u67fb\u3057\u307e\u3059\u3002",
+    confirmText: "\u518d\u8abf\u67fb",
+    onConfirm: rerollMonthlySchedule
+  });
+}
+function renderSchedule() {
+  const calendar = document.getElementById("schedule-calendar");
+  const list = document.getElementById("schedule-briefing-list");
+  const summary = document.getElementById("schedule-summary");
+  if (!calendar || !list) return;
+  state.monthlySchedule = ensureMonthlyScheduleBasics(Array.isArray(state.monthlySchedule) && state.monthlySchedule.length ? state.monthlySchedule : generateMonthlySchedule());
+  const entries = state.monthlySchedule;
+  const rareCount = entries.filter((entry) => entry.strength === "rare").length;
+  if (summary) summary.innerHTML = '<span>RUMORS</span><strong>' + entries.length + '</strong><span>RARE</span><strong>' + rareCount + '</strong><button class="secondary-button schedule-reroll-button" data-reroll-schedule type="button" ' + (state.money < SCHEDULE_REROLL_COST ? 'disabled' : '') + '>\u518d\u8abf\u67fb \u20a1' + SCHEDULE_REROLL_COST + '</button>';
+  calendar.innerHTML = Array.from({ length: SCHEDULE_DAYS }, (_, index) => {
+    const day = index + 1;
+    const dayEntries = scheduleEntriesForDay(day);
+    const isToday = day === Math.min(SCHEDULE_DAYS, Math.max(1, Number(state.day) || 1));
+    const isPast = day < (Number(state.day) || 1);
+    const dayClass = 'schedule-day ' + (isToday ? 'today ' : '') + (isPast ? 'past ' : '') + (dayEntries.length ? 'has-rumor' : '');
+    const chips = dayEntries.map((entry) => '<button class="schedule-chip ' + (entry.strength || 'mid') + '" data-schedule-entry="' + escapeHtml(entry.id) + '" type="button">' + escapeHtml(scheduleStrengthLabel(entry.strength)) + ' // ' + escapeHtml(scheduleCropLabel(entry)) + '</button>').join('');
+    return '<article class="' + dayClass.trim() + '"><header><span>DAY</span><strong>' + String(day).padStart(2, "0") + '</strong></header><div class="schedule-day-events">' + chips + '</div></article>';
+  }).join('');
+  list.innerHTML = entries.map((entry) => {
+    const axisLabel = marketAxisLabel(entry.marketId, scheduleAxisList(entry));
+    const endDay = Number(entry.startDay) + Math.max(1, Number(entry.duration) || 1) - 1;
+    const dayRange = 'DAY ' + String(entry.startDay).padStart(2, "0") + (endDay !== Number(entry.startDay) ? '-' + String(endDay).padStart(2, "0") : '');
+    return '<article class="schedule-note ' + (entry.strength || 'mid') + '" id="schedule-' + escapeHtml(entry.id) + '"><div class="schedule-note-head"><span>' + dayRange + '</span><strong>' + escapeHtml(scheduleStrengthLabel(entry.strength)) + '</strong></div><h3>' + escapeHtml(entry.title) + '</h3><p>' + escapeHtml(entry.rumor) + '</p><small>' + escapeHtml(scheduleCropLabel(entry)) + ' // ' + escapeHtml(scheduleMarketLabel(entry)) + ' // ' + escapeHtml(axisLabel) + '</small><blockquote>' + escapeHtml(entry.comment) + '</blockquote></article>';
+  }).join('');
+}
+function baseMarketUnitPrice(batch, marketId = selectedMarket, options = {}) {
   const crop = CROPS[batch.crop];
   const quality = QUALITY[batch.quality];
   let price = crop.basePrice
     * quality.multiplier
     * (MARKETS[marketId].multipliers[batch.crop] || 0.4)
     * state.marketFluctuation[batch.crop]
-    * cropDemandMultiplier(batch.crop, marketId)
+    * (options.ignoreDemand ? 1 : cropDemandMultiplier(batch.crop, marketId))
+    * (options.ignoreDemand ? 1 : scheduleCropEventMultiplier(batch.crop, marketId))
     * cropEventMultiplier(batch.crop);
 
   if (batch.degraded) price *= 0.5;
   if (marketId === "upper" && batch.quality === "C") price *= 0.65;
   if (state.event && state.event.fee) price *= (1 - state.event.fee);
+  return price;
+}
+
+function lowerMarketReferencePrice(batch) {
+  return baseMarketUnitPrice(batch, "lower");
+}
+
+function getUnitPrice(batch, marketId = selectedMarket) {
+  let price;
+  if (marketId !== "medical" && marketId !== "lower" && !isMarketSpecialty(batch.crop, marketId)) {
+    price = lowerMarketReferencePrice(batch) * (marketId === "rebel" ? 1.5 : 0.5);
+  } else {
+    price = baseMarketUnitPrice(batch, marketId);
+  }
   return Math.max(1, Math.round(price));
 }
 
 function getQuote(cropId, marketId = selectedMarket) {
   return getUnitPrice({ crop: cropId, quality: "B", degraded: false }, marketId);
+}
+
+function bestAvailableQuote(cropOrBatch) {
+  const batch = typeof cropOrBatch === "string"
+    ? { crop: cropOrBatch, quality: "B", degraded: false }
+    : cropOrBatch;
+  if (!batch?.crop) return 1;
+  const prices = Object.keys(MARKETS)
+    .filter((marketId) => isMarketAvailable(marketId) && MARKETS[marketId]?.accepts?.includes(batch.crop))
+    .map((marketId) => getUnitPrice(batch, marketId));
+  return Math.max(1, ...prices);
 }
 
 function unitCount(type) {
@@ -2165,14 +2709,28 @@ function setStatus(message) {
 const soundPool = {};
 const loopAudioPool = {};
 
+function cacheBustedAudioSource(source) {
+  if (!source || /^(data:|blob:)/i.test(source)) return source;
+  const separator = source.includes("?") ? "&" : "?";
+  return `${source}${separator}audio=${AUDIO_CACHE_BUSTER}`;
+}
+
 function playSound(name, volume = null) {
   const source = SOUND_FILES[name];
-  if (!source) return;
-  const audio = soundPool[name] || new Audio(source);
+  if (!source) return false;
+  const audioSource = cacheBustedAudioSource(source);
+  const audio = soundPool[name] || new Audio(audioSource);
   soundPool[name] = audio;
   audio.volume = Math.max(0, Math.min(1, volume ?? SOUND_VOLUMES[name] ?? 0.28));
   audio.currentTime = 0;
   audio.play().catch(() => {});
+  return true;
+}
+
+function playSoundFirst(names, volume = null) {
+  const soundId = names.find((name) => SOUND_FILES[name]);
+  if (!soundId) return false;
+  return playSound(soundId, volume);
 }
 
 function playCommsSound(commsEntry, fallback = "comms_open") {
@@ -2183,7 +2741,7 @@ function playCommsSound(commsEntry, fallback = "comms_open") {
 function loopAudio(id, source) {
   if (!source || source === "none") return null;
   if (!loopAudioPool[id]) {
-    const audio = new Audio(source);
+    const audio = new Audio(cacheBustedAudioSource(source));
     audio.loop = true;
     audio.preload = "auto";
     audio.volume = 0;
@@ -2470,6 +3028,11 @@ function toast(message, type = "") {
   window.setTimeout(() => element.remove(), 3000);
 }
 
+function botActionLog(message) {
+  setStatus(message);
+  toast(message, "bot");
+}
+
 function switchTab(tabId) {
   const previousTab = document.querySelector(".screen.active")?.id?.replace("-screen", "");
   if (tabId === "market" && !state.marketTabUnlocked) {
@@ -2478,6 +3041,11 @@ function switchTab(tabId) {
     return;
   }
   if (tabId === "shop" && !state.shopUnlocked) {
+    toast("Action unavailable right now.", "warning");
+    rejectFeedback();
+    return;
+  }
+  if (tabId === "schedule" && !state.shopUnlocked) {
     toast("Action unavailable right now.", "warning");
     rejectFeedback();
     return;
@@ -2493,6 +3061,10 @@ function switchTab(tabId) {
   document.querySelectorAll(".screen").forEach((screen) => {
     screen.classList.toggle("active", screen.id === `${tabId}-screen`);
   });
+  if (tabId === "schedule") {
+    renderSchedule();
+    triggerComms("schedule_opened");
+  }
   if (tabId === "radio") renderRadio();
   if (previousTab !== tabId) {
     playSound("tab_switch", 0.18);
@@ -3434,7 +4006,7 @@ function applyFacilityView() {
 }
 
 function resetFacilityView() {
-  facilityView = { x: 0, y: 0, zoom: 1 };
+  facilityView = { x: 0, y: 0, zoom: FACILITY_INITIAL_ZOOM };
   applyFacilityView();
 }
 
@@ -3584,7 +4156,7 @@ function sellOwnedItem(kind, id) {
   placementSelection = null;
   setStatus(`${definition.name}を解体売却し、₡${formatNumber(refund)}を回収しました。`);
   toast(`売却 +₡${formatNumber(refund)}`);
-  playSound("equipment_sell", 0.26);
+  playSoundFirst(["equipment_sell", "sale"], 0.26);
   saveGame();
   render();
 }
@@ -3972,7 +4544,8 @@ function buyEquipment(itemId) {
     selectedUnitId = unit.id;
   }
   if (FLOOR_DEVICES[itemId]) {
-    const device = { id: makeId("device"), type: itemId, placed: false, x: null, y: null, tags, dirt: 0 };
+    const device = createFloorDevice(itemId);
+    device.tags = tags;
     currentFloorDevices().push(device);
     placementSelection = { kind: "device", id: device.id };
     selectedDeviceId = device.id;
@@ -3983,11 +4556,14 @@ function buyEquipment(itemId) {
   }
   if (itemId === "filter") state.equipment.filter = true;
   if (itemId === "fridge") state.equipment.fridge = true;
+  if (itemId === "support_os_harvest") state.supportOS.harvest = true;
+  if (itemId === "support_os_planting") state.supportOS.planting = true;
+  if (itemId === "support_os_cleaning") state.supportOS.cleaning = true;
 
   const placementNote = GROW_UNITS[itemId] || FLOOR_DEVICES[itemId] ? " Select a place in the facility layout." : "";
   setStatus(`${EQUIPMENT[itemId].name}を購入しました。${placementNote}`);
   toast(`${EQUIPMENT[itemId].name}を調達`);
-  playSound("buy_equipment");
+  playSoundFirst(["buy_equipment", "equipment_purchase", "purchase"]);
   pulseElement(document.getElementById("money-value"));
   const itemKind = GROW_UNITS[itemId] ? "unit" : FLOOR_DEVICES[itemId] ? "device" : ["water", "nutrient"].includes(itemId) ? "resource" : "upgrade";
   trackPurchase(itemKind, itemId, price, {
@@ -4054,7 +4630,7 @@ function sellBatch(batchId) {
   }
   setStatus(`${MARKETS[selectedMarket].name}で${CROPS[batch.crop].name}を${qty}個売却。₡${formatNumber(revenue)}を受領。`);
   toast(`売却成立 +₡${formatNumber(revenue)}`);
-  playSound("sell_crop", premiumSale ? 0.42 : 0.34);
+  playSoundFirst(["sell_crop", "sale"], premiumSale ? 0.42 : 0.34);
   hapticFeedback(premiumSale ? [12, 34, 12] : 14);
   burstEffect(saleSourceElement, premiumSale ? "#fff2a8" : "#f5d65b", premiumSale ? 28 : 18);
   const commsContext = {
@@ -4216,6 +4792,440 @@ function cleanItem(kind, id, tool = "brush") {
   render();
 }
 
+function currentBaseElementSelector(kind, id) {
+  return `[data-drag-kind="${kind}"][data-drag-id="${id}"]`;
+}
+
+function addInventoryFromPlant(plant) {
+  const existing = state.inventory.find((batch) => batch.crop === plant.crop && batch.quality === plant.quality && batch.degraded === plant.degraded && batch.age === 0);
+  if (existing) existing.qty += 1;
+  else state.inventory.push({ id: `${Date.now()}-${Math.random()}`, crop: plant.crop, quality: plant.quality, qty: 1, age: 0, degraded: plant.degraded });
+}
+
+function harvestPlantByRobot(base, unit, slotIndex, robot) {
+  const plant = unit.slots?.[slotIndex];
+  if (!plant?.ready) return false;
+  addInventoryFromPlant(plant);
+  trackHarvestAnalytics(plant, unit, 1);
+  if (plant.crop === "tomato") state.tomatoHarvested = true;
+  unit.slots[slotIndex] = null;
+  farmRenderRequested = true;
+  state.marketTabUnlocked = true;
+  const target = base.id === currentBase().id ? document.querySelector(`[data-shelf="${currentShelves().findIndex((entry) => entry.id === unit.id)}"][data-slot="${slotIndex}"]`) : null;
+  if (target) {
+    burstEffect(target, QUALITY[plant.quality]?.color || "#72ffb8", 12);
+    floatingFeedback(target, "BOT +1", QUALITY[plant.quality]?.color || "#72ffb8", "harvest small");
+  }
+  botActionLog(`BOT // ${CROPS[plant.crop]?.name || plant.crop} harvested.`);
+  playSound("harvest_single", 0.12);
+  triggerComms("first_harvest", { cropId: plant.crop, cropName: CROPS[plant.crop]?.name || plant.crop, quality: plant.quality, unitType: unit.type, unitName: GROW_UNITS[unit.type]?.name || unit.type, qty: 1 });
+  triggerComms("harvest", { cropId: plant.crop, cropName: CROPS[plant.crop]?.name || plant.crop, quality: plant.quality, unitType: unit.type, unitName: GROW_UNITS[unit.type]?.name || unit.type, qty: 1 });
+  return true;
+}
+
+function cleanItemByRobot(base, kind, item, robot) {
+  if (!needsCleaning(item)) return false;
+  item.dirt = 0;
+  const target = base.id === currentBase().id ? document.querySelector(currentBaseElementSelector(kind, item.id)) : null;
+  if (target) brushCleanEffect(target);
+  botActionLog(`BOT // ${kind === "unit" ? GROW_UNITS[item.type]?.name : FLOOR_DEVICES[item.type]?.name} cleaned.`);
+  playSound("clean_brush", 0.1);
+  return true;
+}
+
+function plantSeedByRobot(base, unit, slotIndex, cropId, robot) {
+  const crop = CROPS[cropId];
+  if (!crop || !unit?.placed || unit.slots?.[slotIndex]) return false;
+  if ((state.seeds[cropId] || 0) <= 0) return false;
+  const plantingCost = plantingResourceCost(cropId, unit);
+  if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) return false;
+  state.water -= plantingCost.water;
+  state.nutrient -= plantingCost.nutrient;
+  state.seeds[cropId] -= 1;
+  const plantedAt = Date.now();
+  unit.slots[slotIndex] = {
+    id: makeId("plant"),
+    crop: cropId,
+    growth: 0,
+    ready: false,
+    readyAge: 0,
+    degraded: false,
+    waterShortage: false,
+    nutrientShortage: false,
+    witherProgress: 0,
+    dead: false,
+    visualStage: 1,
+    stagePulseAt: plantedAt,
+    prepaid: !GROW_UNITS[unit.type].continuous,
+    quality: null
+  };
+  const shelfIndex = base.shelves.findIndex((entry) => entry.id === unit.id);
+  trackPlanting(cropId, unit, shelfIndex, slotIndex, plantingCost);
+  const target = base.id === currentBase().id ? document.querySelector(`[data-shelf="${shelfIndex}"][data-slot="${slotIndex}"]`) : null;
+  if (target) {
+    burstEffect(target, crop.color, 12);
+    floatingFeedback(target, "BOT PLANT", crop.color, "small");
+  }
+  botActionLog(`BOT // ${crop.name} planted.`);
+  playSound("plant_seed", 0.12);
+  triggerComms("first_plant", { cropId, cropName: crop.name, unitType: unit.type, unitName: GROW_UNITS[unit.type]?.name || unit.type, shelfIndex, slotIndex, automated: true });
+  triggerComms("plant", { cropId, cropName: crop.name, unitType: unit.type, unitName: GROW_UNITS[unit.type]?.name || unit.type, shelfIndex, slotIndex, automated: true });
+  return true;
+}
+
+function configuredProcurementEntries() {
+  ensureSupportAutomationState();
+  return Object.entries(state.automation.procurement.byCrop || {})
+    .filter(([cropId, config]) => CROPS[cropId] && config.enabled);
+}
+
+function configuredShippingEntries() {
+  ensureSupportAutomationState();
+  return Object.entries(state.automation.shipping.byCrop || {})
+    .filter(([cropId, config]) => CROPS[cropId] && config.enabled);
+}
+
+function buySeedsByRobot() {
+  const entry = configuredProcurementEntries().find(([cropId, config]) => {
+    const crop = CROPS[cropId];
+    if (!crop || !isUnlocked("seed_item", cropId)) return false;
+    const targetSeeds = crop.packSize * Math.max(1, config.packs || 1);
+    return (state.seeds[cropId] || 0) < targetSeeds && state.money >= crop.seedPrice;
+  });
+  if (!entry) return false;
+  const [cropId] = entry;
+  const crop = CROPS[cropId];
+  state.money -= crop.seedPrice;
+  state.seeds[cropId] = (state.seeds[cropId] || 0) + crop.packSize;
+  trackPurchase("seed", cropId, crop.seedPrice, { itemName: crop.name, packSize: crop.packSize, automated: true });
+  botActionLog(`BOT // ${crop.name} seed pack purchased.`);
+  playSound("buy_seed", 0.11);
+  return true;
+}
+
+function sellInventoryByRobot(cropId, marketId) {
+  if (!isMarketAvailable(marketId) || !MARKETS[marketId]?.accepts.includes(cropId)) return false;
+  const batches = state.inventory.filter((item) => item.crop === cropId && Math.max(0, Number(item.qty) || 0) > 0);
+  if (!batches.length) return false;
+
+  let totalQty = 0;
+  let totalRevenue = 0;
+  let premiumSale = false;
+  batches.forEach((batch) => {
+    const amount = Math.max(0, Number(batch.qty) || 0);
+    const unitPrice = getUnitPrice(batch, marketId);
+    const revenue = unitPrice * amount;
+    if (amount <= 0) return;
+    totalQty += amount;
+    totalRevenue += revenue;
+    premiumSale = premiumSale || unitPrice >= bestAvailableQuote(batch) * 0.98;
+    trackSaleAnalytics(batch, marketId, amount, unitPrice, revenue, unitPrice >= bestAvailableQuote(batch) * 0.98);
+    batch.qty = 0;
+  });
+
+  if (totalQty <= 0) return false;
+  state.money += totalRevenue;
+  state.inventory = state.inventory.filter((item) => item.crop !== cropId || item.qty > 0);
+  state.tradeStats.byCrop ||= {};
+  state.tradeStats.byMarket ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
+  state.tradeStats.unitsSold = (Number(state.tradeStats.unitsSold) || 0) + totalQty;
+  state.tradeStats.revenue = (Number(state.tradeStats.revenue) || 0) + totalRevenue;
+  state.tradeStats.byCrop[cropId] = (state.tradeStats.byCrop[cropId] || 0) + totalQty;
+  state.tradeStats.byMarket[marketId] = (state.tradeStats.byMarket[marketId] || 0) + totalRevenue;
+  state.tradeStats.byMarketQty ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
+  state.tradeStats.byMarketQty[marketId] = (state.tradeStats.byMarketQty[marketId] || 0) + totalQty;
+  if (marketId === "rebel") {
+    if (CROPS[cropId]?.category === "weapon") state.tradeStats.weaponsToRebels += totalQty;
+    else state.tradeStats.foodToRebels += totalQty;
+  }
+
+  const cropName = CROPS[cropId]?.name || cropId;
+  const marketName = MARKETS[marketId]?.name || marketId;
+  botActionLog(`BOT // ${cropName} shipped to ${marketName}. x${totalQty} +C${formatNumber(totalRevenue)}`);
+  playSoundFirst(["sell_crop", "sale"], premiumSale ? 0.18 : 0.12);
+  triggerComms("first_sale", { cropId, cropName, marketId, marketName, qty: totalQty, revenue: totalRevenue, automated: true });
+  triggerComms("sale", { cropId, cropName, marketId, marketName, qty: totalQty, revenue: totalRevenue, automated: true });
+  return true;
+}
+function sellConfiguredInventoryByRobot() {
+  let soldAny = false;
+  configuredShippingEntries().forEach(([cropId, config]) => {
+    if (!MARKETS[config.marketId]?.accepts.includes(cropId) || !isMarketAvailable(config.marketId)) return;
+    const hasStock = state.inventory.some((item) => item.crop === cropId && Math.max(0, Number(item.qty) || 0) > 0);
+    if (!hasStock) return;
+    if (sellInventoryByRobot(cropId, config.marketId)) soldAny = true;
+  });
+  return soldAny;
+}
+
+function findSupportHarvestTarget(base, robot) {
+  ensureSupportRobotProfile(robot);
+  if (!state.supportOS?.harvest || !robot.harvestAutomation?.enabled) return null;
+  for (const unit of base.shelves) {
+    if (!unit.placed || !supportRobotCanReach(robot, unit, "unit")) continue;
+    const slotIndex = unit.slots.findIndex((plant) => plant?.ready);
+    if (slotIndex >= 0) return { unit, slotIndex };
+  }
+  return null;
+}
+
+function findSupportPlantingTarget(base, robot) {
+  ensureSupportRobotProfile(robot);
+  const planting = robot.plantingAutomation || {};
+  if (!state.supportOS?.planting || !planting.enabled) return null;
+  const cropId = CROPS[planting.cropId] ? planting.cropId : "lettuce";
+  if ((state.seeds[cropId] || 0) <= 0) return null;
+  for (const unit of base.shelves) {
+    if (!unit.placed || !supportRobotCanReach(robot, unit, "unit")) continue;
+    const slotIndex = unit.slots.findIndex((plant) => !plant);
+    if (slotIndex < 0) continue;
+    const plantingCost = plantingResourceCost(cropId, unit);
+    if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) return null;
+    return { unit, slotIndex, cropId };
+  }
+  return null;
+}
+
+function findSupportCleaningTarget(base, robot) {
+  if (!state.supportOS?.cleaning) return null;
+  const unit = base.shelves.find((item) => item.placed && needsCleaning(item) && supportRobotCanReach(robot, item, "unit"));
+  if (unit) return { kind: "unit", item: unit };
+  const device = base.floorDevices.find((item) => item.placed && needsCleaning(item) && supportRobotCanReach(robot, item, "device"));
+  if (device) return { kind: "device", item: device };
+  return null;
+}
+
+function baseHasReachableDevice(base, robot, type) {
+  return base.floorDevices.some((device) => device.type === type && device.placed && supportRobotCanReach(robot, device, "device"));
+}
+function reachableSupportRobotCountForDevice(type, base = currentBase()) {
+  return base.floorDevices.filter((device) => device.type === "support_robot" && device.placed && baseHasReachableDevice(base, device, type)).length;
+}
+
+function supportAutomationRunHint(type) {
+  if (!state.timeUnlocked) return "ゲーム内時間が始まると自動処理が動きます。";
+  if (state.paused) return "現在は一時停止中です。再開すると自動処理が動きます。";
+  const reachable = reachableSupportRobotCountForDevice(type);
+  if (reachable <= 0) return "この拠点では、搬出口の範囲内にサポートロボットがいません。";
+  return `搬出口に接続できるサポートロボット: ${reachable}体`;
+}
+
+
+function processSupportRobots(deltaDays) {
+  ensureSupportAutomationState();
+  if (!state.timeUnlocked || state.ended || state.paused) return;
+  let acted = false;
+  ownedBases().forEach((base) => {
+    base.floorDevices.filter((device) => device.type === "support_robot" && device.placed).forEach((robot) => {
+      ensureSupportRobotProfile(robot);
+      tickSupportRobotCooldowns(robot, deltaDays);
+      robot.supportEnergy = Math.min(SUPPORT_ROBOT_MAX_ENERGY, (Number(robot.supportEnergy) || 0) + deltaDays * 18);
+
+      const tryTask = (task, action) => {
+        if (!supportRobotTaskReady(robot, task)) return false;
+        if (!action()) return false;
+        spendSupportRobotAction(robot, task);
+        acted = true;
+        return true;
+      };
+
+      const actions = [
+        ["harvest", () => {
+          const harvestTarget = findSupportHarvestTarget(base, robot);
+          return Boolean(harvestTarget && harvestPlantByRobot(base, harvestTarget.unit, harvestTarget.slotIndex, robot));
+        }],
+        ["ship", () => (
+          baseHasReachableDevice(base, robot, "shipping_hatch") && sellConfiguredInventoryByRobot()
+        )],
+        ["plant", () => {
+          const plantingTarget = findSupportPlantingTarget(base, robot);
+          return Boolean(plantingTarget && plantSeedByRobot(base, plantingTarget.unit, plantingTarget.slotIndex, plantingTarget.cropId, robot));
+        }],
+        ["cleaning", () => {
+          const cleaningTarget = findSupportCleaningTarget(base, robot);
+          return Boolean(cleaningTarget && cleanItemByRobot(base, cleaningTarget.kind, cleaningTarget.item, robot));
+        }],
+        ["procure", () => (
+          baseHasReachableDevice(base, robot, "procurement_terminal") && buySeedsByRobot()
+        )]
+      ];
+
+      actions.some(([task, action]) => tryTask(task, action));
+    });
+  });
+  if (acted) {
+    if (document.getElementById("farm-screen")?.classList.contains("active")) {
+      farmRenderRequested = false;
+      renderFarm();
+    } else {
+      farmRenderRequested = true;
+    }
+    if (document.getElementById("market-screen")?.classList.contains("active")) renderMarkets();
+    if (document.getElementById("shop-screen")?.classList.contains("active")) renderShop();
+    const activeModalTitle = document.getElementById("modal-backdrop")?.classList.contains("hidden")
+      ? ""
+      : document.getElementById("modal-title")?.textContent;
+    if (activeModalTitle === "自動出荷設定") showShippingTerminal();
+    if (activeModalTitle === "自動種子調達") showProcurementTerminal();
+    renderHeader();
+    saveGame();
+    checkVictory();
+  }
+}
+
+function automationButtonClass(active) {
+  return active ? "secondary-button active" : "secondary-button";
+}
+
+function supportRobotHarvestPanel(device) {
+  ensureSupportRobotProfile(device);
+  const config = device.harvestAutomation || { enabled: true };
+  const locked = !state.supportOS?.harvest;
+  return `<div class="automation-config compact-config robot-harvest-config">
+    <div class="automation-section"><h4>自動収穫設定</h4>
+      ${locked ? `<div class="automation-detail-card"><p class="automation-hint">収穫OSを購入すると、このロボットごとの自動収穫を切り替えられます。</p></div>` : `<div class="automation-detail-card">
+        <div class="automation-row compact"><strong>収穫AI</strong><button class="${automationButtonClass(config.enabled)}" data-auto-action="robot-harvest-toggle" data-robot-id="${device.id}">${config.enabled ? "ONLINE" : "OFFLINE"}</button></div>
+        <small class="automation-hint">ONLINE中は、この個体の行動範囲内に収穫可能な株があれば、一株ずつ収穫します。</small>
+      </div>`}
+    </div>
+  </div>`;
+}
+function supportRobotPlantingPanel(device) {
+  ensureSupportRobotProfile(device);
+  const config = device.plantingAutomation || { enabled: false, cropId: "lettuce" };
+  const cropId = CROPS[config.cropId] ? config.cropId : "lettuce";
+  const locked = !state.supportOS?.planting;
+  const cropButtons = Object.entries(CROPS).map(([entryCropId, crop]) => {
+    const seedLocked = !isUnlocked("seed_item", entryCropId);
+    return `<button class="${automationButtonClass(entryCropId === cropId)}" data-auto-action="robot-plant-select" data-robot-id="${device.id}" data-crop-id="${entryCropId}" ${locked || seedLocked ? "disabled" : ""}>${escapeHtml(crop.name)}</button>`;
+  }).join("");
+  return `<div class="automation-config compact-config robot-planting-config">
+    <div class="automation-section"><h4>自動植え付け設定</h4>
+      <p>このロボット個体が範囲内の空きスロットへ植える種を指定します。種と水と養液がある限り、一株ずつ植え付けます。</p>
+      ${locked ? `<div class="automation-detail-card"><p class="automation-hint">植え付けOSを購入すると、このロボットごとの自動植え付け設定を変更できます。</p></div>` : `<div class="automation-buttons crop-selector">${cropButtons}</div>
+      <div class="automation-detail-card">
+        ${selectedAutomationCropCard(cropId, "procurement")}
+        <div class="automation-row compact"><strong>植え付けAI</strong><button class="${automationButtonClass(config.enabled)}" data-auto-action="robot-plant-toggle" data-robot-id="${device.id}" data-crop-id="${cropId}">${config.enabled ? "ONLINE" : "OFFLINE"}</button></div>
+        <small class="automation-hint">ONLINE中は、この個体の行動範囲内に空きスロットがあれば、選択中の種をあるだけ植えていきます。</small>
+      </div>`}
+    </div>
+  </div>`;
+}
+
+function showSupportRobotPanel(device) {
+  ensureSupportRobotProfile(device);
+  const skill = supportRobotSkill(device);
+  const personality = supportRobotPersonality(device);
+  const html = `<div class="device-detail support-automation-panel"><img src="${FLOOR_DEVICES.support_robot?.sprite || FLOOR_DEVICES.support_robot?.icon}" alt=""><div><h3>${escapeHtml(FLOOR_DEVICES.support_robot?.name || "Support Robot")}</h3><p>特技: ${escapeHtml(skill.name || device.robotSkillId)} // 収穫${supportTaskGrade(device, "harvest")} 植付${supportTaskGrade(device, "plant")} 清掃${supportTaskGrade(device, "cleaning")} 調達${supportTaskGrade(device, "procure")} 出荷${supportTaskGrade(device, "ship")}</p><p>性格: ${escapeHtml(personality.name || device.robotPersonalityId)} // 範囲 ${supportRobotRange(device)} / ENERGY ${Math.round(Number(device.supportEnergy) || 0)}%</p><p>OS: 収穫 ${state.supportOS.harvest ? "ONLINE" : "LOCKED"} / 植付 ${state.supportOS.planting ? "ONLINE" : "LOCKED"} / 清掃 ${state.supportOS.cleaning ? "ONLINE" : "LOCKED"}</p></div></div>${supportRobotHarvestPanel(device)}${supportRobotPlantingPanel(device)}`;
+  showModal("SUPPORT ROBOT", "支援ロボット個体情報", html, true, false, "閉じる");
+}
+function cropChoiceButtons(actionPrefix, selectedCropId, { seedLocked = false } = {}) {
+  return Object.entries(CROPS).map(([cropId, crop]) => {
+    const locked = seedLocked && !isUnlocked("seed_item", cropId);
+    return `<button class="${automationButtonClass(cropId === selectedCropId)}" data-auto-action="${actionPrefix}" data-crop-id="${cropId}" ${locked ? "disabled" : ""}>${escapeHtml(crop.name)}</button>`;
+  }).join("");
+}
+
+function cropStockCount(cropId) {
+  return state.inventory.filter((item) => item.crop === cropId).reduce((sum, item) => sum + Math.max(0, Number(item.qty) || 0), 0);
+}
+
+function selectedAutomationCropCard(cropId, mode) {
+  const crop = CROPS[cropId] || CROPS.lettuce;
+  const subline = mode === "shipping"
+    ? `STOCK ${cropStockCount(cropId)}`
+    : `SEED ${state.seeds[cropId] || 0} / PACK ${crop.packSize}`;
+  return `<div class="automation-selected-crop" style="--crop-color:${crop.color}">
+    <img src="${crop.icon}" alt="">
+    <div><strong>${escapeHtml(crop.name)}</strong><small>${subline}</small><p>${escapeHtml(crop.note || "")}</p></div>
+  </div>`;
+}
+
+function procurementSelectedPanel() {
+  const cropId = CROPS[state.automation.procurement.selectedCropId] ? state.automation.procurement.selectedCropId : "lettuce";
+  const crop = CROPS[cropId];
+  const config = state.automation.procurement.byCrop[cropId] || { enabled: false, packs: 1 };
+  const locked = !isUnlocked("seed_item", cropId);
+  return `<div class="automation-detail-card">
+    ${selectedAutomationCropCard(cropId, "procurement")}
+    <div class="automation-row compact"><strong>調達</strong><button class="${automationButtonClass(config.enabled)}" data-auto-action="proc-toggle" data-crop-id="${cropId}" ${locked ? "disabled" : ""}>${locked ? "LOCKED" : config.enabled ? "ONLINE" : "OFFLINE"}</button></div>
+    <div class="automation-row compact"><strong>PACKS</strong><span class="automation-stepper"><button class="secondary-button" data-auto-action="proc-packs" data-crop-id="${cropId}" data-delta="-1" ${locked ? "disabled" : ""}>-</button><strong>${config.packs}</strong><button class="secondary-button" data-auto-action="proc-packs" data-crop-id="${cropId}" data-delta="1" ${locked ? "disabled" : ""}>+</button></span></div>
+    <small class="automation-hint">${locked ? "この種はまだ購入できません。" : `目標 ${crop.packSize * config.packs}粒を下回ると1パックずつ購入します。`}</small>
+  </div>`;
+}
+function shippingMarketButtons(cropId, selectedMarketId) {
+  return Object.entries(MARKETS).map(([marketId, market]) => `<button class="${automationButtonClass(marketId === selectedMarketId)}" data-auto-action="ship-market" data-crop-id="${cropId}" data-market-id="${marketId}" ${isMarketAvailable(marketId) && market.accepts.includes(cropId) ? "" : "disabled"}>${escapeHtml(market.name)}</button>`).join("");
+}
+
+function shippingSelectedPanel() {
+  const cropId = CROPS[state.automation.shipping.selectedCropId] ? state.automation.shipping.selectedCropId : "lettuce";
+  const config = state.automation.shipping.byCrop[cropId] || { enabled: false, marketId: "lower", qty: 1 };
+  return `<div class="automation-detail-card">
+    ${selectedAutomationCropCard(cropId, "shipping")}
+    <div class="automation-row compact"><strong>出荷</strong><button class="${automationButtonClass(config.enabled)}" data-auto-action="ship-toggle" data-crop-id="${cropId}">${config.enabled ? "ONLINE" : "OFFLINE"}</button></div>
+    <div class="automation-row compact market-row"><strong>MARKET</strong><div class="automation-buttons market-buttons">${shippingMarketButtons(cropId, config.marketId)}</div></div>
+    <p class="automation-hint">在庫がある場合、この作物を一括で自動出荷します。</p>
+    <small class="automation-hint">${supportAutomationRunHint("shipping_hatch")}</small>
+  </div>`;
+}
+function showProcurementTerminal() {
+  ensureSupportAutomationState();
+  const selectedCropId = state.automation.procurement.selectedCropId;
+  const html = `<div class="automation-config compact-config"><p>SEEDで作物を選び、種子の自動調達だけを作物ごとに設定します。植え付けAIは各サポートロボットをクリックして設定します。</p>
+    <div class="automation-section"><h4>SEED</h4><div class="automation-buttons crop-selector">${cropChoiceButtons("proc-select", selectedCropId)}</div>${procurementSelectedPanel()}</div></div>`;
+  showModal("PROCUREMENT TERMINAL", "自動種子調達", html, true, false, "閉じる");
+}
+function showShippingTerminal() {
+  ensureSupportAutomationState();
+  const selectedCropId = state.automation.shipping.selectedCropId;
+  const html = `<div class="automation-config compact-config"><p>CROPで作物を選び、作物ごとに出荷ON/OFFと販売先を設定します。出荷時は指定作物の在庫を一括で売却します。</p>
+    <div class="automation-section"><h4>CROP</h4><div class="automation-buttons crop-selector">${cropChoiceButtons("ship-select", selectedCropId)}</div>${shippingSelectedPanel()}</div></div>`;
+  showModal("SHIPPING HATCH", "自動出荷設定", html, true, false, "閉じる");
+}
+function handleAutomationControl(button) {
+  ensureSupportAutomationState();
+  const action = button.dataset.autoAction;
+  const cropId = button.dataset.cropId;
+
+  if (action === "robot-harvest-toggle") {
+    const robot = findSupportRobotById(button.dataset.robotId);
+    if (!robot || !state.supportOS?.harvest) return;
+    ensureSupportRobotProfile(robot);
+    robot.harvestAutomation.enabled = !robot.harvestAutomation.enabled;
+    playSound("tab_switch", 0.08);
+    saveGame();
+    showSupportRobotPanel(robot);
+    return;
+  }
+
+  if (action?.startsWith("robot-plant")) {
+    const robot = findSupportRobotById(button.dataset.robotId);
+    if (!robot || !state.supportOS?.planting) return;
+    ensureSupportRobotProfile(robot);
+    if (action === "robot-plant-select" && CROPS[cropId]) robot.plantingAutomation.cropId = cropId;
+    if (action === "robot-plant-toggle") {
+      const targetCropId = CROPS[cropId] ? cropId : robot.plantingAutomation.cropId;
+      robot.plantingAutomation.cropId = targetCropId;
+      robot.plantingAutomation.enabled = !(robot.plantingAutomation.enabled && robot.plantingAutomation.cropId === targetCropId);
+    }
+    playSound("tab_switch", 0.08);
+    saveGame();
+    showSupportRobotPanel(robot);
+    return;
+  }
+
+  if (action === "proc-select" && CROPS[cropId]) state.automation.procurement.selectedCropId = cropId;
+  if (action === "ship-select" && CROPS[cropId]) state.automation.shipping.selectedCropId = cropId;
+  if (action === "proc-toggle" && CROPS[cropId]) state.automation.procurement.byCrop[cropId].enabled = !state.automation.procurement.byCrop[cropId].enabled;
+  if (action === "proc-packs" && CROPS[cropId]) state.automation.procurement.byCrop[cropId].packs = Math.max(1, Math.min(12, state.automation.procurement.byCrop[cropId].packs + Number(button.dataset.delta || 0)));
+  if (action === "ship-toggle" && CROPS[cropId]) state.automation.shipping.byCrop[cropId].enabled = !state.automation.shipping.byCrop[cropId].enabled;
+  if (action === "ship-market" && CROPS[cropId] && MARKETS[button.dataset.marketId]) state.automation.shipping.byCrop[cropId].marketId = button.dataset.marketId;
+  playSound("tab_switch", 0.08);
+  saveGame();
+  if (action.startsWith("ship")) showShippingTerminal();
+  else showProcurementTerminal();
+}
+
 function adjustEnvironment(key, delta) {
   const base = currentBase();
   base.environment ||= { ...DEFAULT_ENVIRONMENT };
@@ -4298,6 +5308,7 @@ function realtimeTick() {
 
   const deltaDays = elapsedMs / REALTIME_DAY_MS;
   processRealtimeGrowth(deltaDays);
+  processSupportRobots(deltaDays);
   if (!state.timeUnlocked) {
     state.dayProgress = 0;
     if (now - lastRenderAt >= 350) {
@@ -4518,14 +5529,17 @@ function showDay30Report(summary) {
   document.getElementById("modal-reset").style.display = "none";
 }
 
-function showModal(kicker, title, content, canContinue) {
+function showModal(kicker, title, content, canContinue, showReset = true, closeLabel = "続ける") {
   document.getElementById("modal-kicker").textContent = kicker;
   document.getElementById("modal-title").textContent = title;
   document.getElementById("modal-content").innerHTML = content;
-  document.getElementById("modal-close").hidden = false;
-  document.getElementById("modal-reset").hidden = false;
-  document.getElementById("modal-close").style.display = canContinue ? "" : "none";
-  document.getElementById("modal-reset").style.display = "";
+  const closeButton = document.getElementById("modal-close");
+  const resetButton = document.getElementById("modal-reset");
+  closeButton.textContent = closeLabel;
+  closeButton.hidden = !canContinue;
+  closeButton.style.display = canContinue ? "" : "none";
+  resetButton.hidden = !showReset;
+  resetButton.style.display = showReset ? "" : "none";
   document.getElementById("modal-backdrop").classList.remove("hidden");
 }
 
@@ -4553,6 +5567,76 @@ function clearSessionInteractionState() {
   pendingComms = [];
 }
 
+function hasStartProgress() {
+  const shelves = allShelves();
+  return state.day > 1
+    || state.tradeStats?.unitsSold > 0
+    || ownedBases().length > 1
+    || shelves.some((unit) => unit.placed || unit.slots?.some(Boolean))
+    || allFloorDevices().some((device) => device.placed);
+}
+
+function startSelectedModeGame() {
+  if (startModeView === "free") startFreeGame();
+  else startDay30Game();
+}
+
+function handleStartPrimary() {
+  if (hasStartProgress()) closeStartScreen();
+  else startSelectedModeGame();
+}
+
+function unlockDebugState() {
+  state.money = 99999;
+  state.water = Math.max(Number(state.water) || 0, 999);
+  state.nutrientCapacity = Math.max(Number(state.nutrientCapacity) || 0, 999);
+  state.nutrient = Math.max(Number(state.nutrient) || 0, 999);
+  state.seeds = Object.fromEntries(Object.keys(CROPS).map((cropId) => [cropId, 99]));
+  state.marketUnlocked = Object.fromEntries(Object.keys(MARKETS).map((marketId) => [marketId, true]));
+  state.marketTabUnlocked = true;
+  state.shopUnlocked = true;
+  state.brokerUnlocked = true;
+  state.timeUnlocked = true;
+  state.unlocks ||= {};
+  UNLOCK_RULES.forEach((rule) => {
+    state.unlocks[rule.id] = true;
+    applyUnlock(rule);
+  });
+  state.equipment = {
+    ...(state.equipment || {}),
+    tanks: Math.max(Number(state.equipment?.tanks) || 0, 3),
+    filter: true,
+    fridge: true
+  };
+  state.propertyListings = generatePropertyListings(PROPERTY_LISTING_COUNT);
+  state.log = "DEBUG OPERATION READY // all routes and procurement unlocked.";
+}
+
+function startDebugGame() {
+  clearSessionInteractionState();
+  state = createInitialState("free");
+  unlockDebugState();
+  updateMarketForDay();
+  startScreenOpen = false;
+  lastTickAt = Date.now();
+  document.getElementById("start-screen")?.classList.add("hidden");
+  document.getElementById("start-screen")?.setAttribute("aria-hidden", "true");
+  document.getElementById("modal-backdrop")?.classList.add("hidden");
+  document.getElementById("comms-banner")?.classList.add("hidden");
+  saveGame();
+  render();
+  toast("DEBUG OPERATION READY");
+  playSound("unlock_notice", 0.2);
+}
+
+function handleStartTitleTap() {
+  const now = Date.now();
+  startTitleTapCount = now - startTitleTapAt > 1600 ? 1 : startTitleTapCount + 1;
+  startTitleTapAt = now;
+  if (startTitleTapCount < 5) return;
+  startTitleTapCount = 0;
+  startDebugGame();
+}
 function startNewGame(mode = "normal") {
   clearSessionInteractionState();
   state = createInitialState(mode);
@@ -4637,11 +5721,17 @@ function updateStartScreen() {
   const modeButton = document.getElementById("start-day30");
   const recordsTitle = document.getElementById("start-records-title");
   if (!status || !continueButton) return;
-  const hasProgress = state.day > 1 || state.tradeStats?.unitsSold > 0 || allShelves().some((unit) => unit.placed || unit.slots?.some(Boolean));
-  continueButton.textContent = "開始";
+  const hasProgress = hasStartProgress();
+  const newButton = document.getElementById("start-new");
+  continueButton.textContent = hasProgress ? "続きから" : `${selectedStartModeLabel()}開始`;
   if (modeButton) {
+    modeButton.hidden = true;
     modeButton.textContent = selectedStartModeLabel();
     modeButton.classList.toggle("free-mode", startModeView === "free");
+  }
+  if (newButton) {
+    newButton.hidden = !hasProgress;
+    newButton.textContent = `${selectedStartModeLabel()}で新規開始`;
   }
   if (recordsTitle) recordsTitle.textContent = startModeView === "free" ? "FREE MODE RECORDS" : "DAY30 RECORDS";
   status.textContent = hasProgress
@@ -4756,13 +5846,7 @@ function confirmWidgetExtraAction() {
 }
 
 function requestNewGame() {
-  openConfirmWidget({
-    kicker: "NEW OPERATION",
-    title: "新規開始",
-    copy: "現在のセーブデータを削除してDAY 01から開始します。",
-    confirmText: "新規開始",
-    onConfirm: startNewGame
-  });
+  requestSelectedModeGame();
 }
 
 function requestDay30Game() {
@@ -5107,17 +6191,22 @@ function renderFarm() {
       </div>
       <small>GRID READY</small>`;
 
-  const coverageDevice = selectedDeviceId
-    ? floorDevices.find((device) => device.id === selectedDeviceId && device.placed)
-    : null;
+  const coverageDevices = floorDevices.filter((device) => {
+    const definition = FLOOR_DEVICES[device.type];
+    return device.placed && definition && Number(definition.radius) > 0;
+  });
   const cellMarkup = Array.from({ length: base.cols * base.rows }, (_, index) => {
     const x = index % base.cols;
     const y = Math.floor(index / base.cols);
     const blocked = isBlockedCell(base, x, y);
-    const covered = coverageDevice
-      && Math.max(Math.abs(x - coverageDevice.x), Math.abs(y - coverageDevice.y)) <= FLOOR_DEVICES[coverageDevice.type].radius;
+    const coverageTypes = coverageDevices
+      .filter((device) => Math.max(Math.abs(x - device.x), Math.abs(y - device.y)) <= FLOOR_DEVICES[device.type].radius)
+      .map((device) => device.type);
+    const coverageClass = !blocked && coverageTypes.length
+      ? ["covered", ...new Set(coverageTypes.map((type) => `covered-${type}`))].join(" ")
+      : "";
     const placeable = !blocked && placementItem && canPlace(placementItem, x, y, placementItem.id);
-    return `<button class="facility-cell ${blocked ? "blocked-cell" : ""} ${covered && !blocked ? `covered covered-${coverageDevice.type}` : ""} ${placeable ? "placeable" : ""}"
+    return `<button class="facility-cell ${blocked ? "blocked-cell" : ""} ${coverageClass} ${placeable ? "placeable" : ""}"
       style="grid-column:${x + 1};grid-row:${y + 1}" data-grid-x="${x}" data-grid-y="${y}" aria-label="${blocked ? "Blocked cell" : "Grid cell"} ${x + 1}, ${y + 1}" ${blocked ? "disabled" : ""}></button>`;
   }).join("");
 
@@ -5272,22 +6361,65 @@ function estimateQuality(plant) {
   return "予測 B-S";
 }
 
-function renderMarkets() {
-  document.getElementById("market-selector").innerHTML = Object.entries(MARKETS).map(([marketId, market]) => {
-    const available = isMarketAvailable(marketId);
-    return `
-    <button class="market-card ${selectedMarket === marketId ? "active" : ""} ${available ? "" : "locked"}" data-market="${marketId}" ${available ? "" : "disabled"}>
-      <img class="market-portrait" src="${market.portrait}" alt="${market.contact}">
-      <span class="market-copy">
-        <span class="market-contact">${market.contact}</span>
-        <strong>${market.name}</strong>
-        <small>${market.description}</small>
-        <span class="market-risk">${available
-          ? `Permanent trade // total C${formatNumber(state.tradeStats.byMarket[marketId])}`
-          : `LOCKED // ${market.unlockHint}`}</span>
-      </span>
-    </button>
-  `;}).join("");
+function marketIds() {
+  return Object.keys(MARKETS);
+}
+
+function availableMarketIds() {
+  return marketIds().filter(isMarketAvailable);
+}
+
+function cycleMarket(direction = 1) {
+  const available = availableMarketIds();
+  if (!available.length) return;
+  const currentIndex = Math.max(0, available.indexOf(selectedMarket));
+  selectedMarket = available[(currentIndex + direction + available.length) % available.length];
+  playSound("market_select", 0.2);
+  hapticFeedback(8);
+  renderMarkets(direction > 0 ? "next" : "prev");
+}
+
+function marketCarouselPosition(marketId) {
+  const ids = marketIds();
+  const selectedIndex = Math.max(0, ids.indexOf(selectedMarket));
+  const index = ids.indexOf(marketId);
+  const count = ids.length;
+  let offset = index - selectedIndex;
+  if (offset > count / 2) offset -= count;
+  if (offset < -count / 2) offset += count;
+  if (offset === 0) return "center";
+  if (offset === -1 || offset === count - 1) return "left";
+  if (offset === 1 || offset === 1 - count) return "right";
+  return offset < 0 ? "far-left" : "far-right";
+}
+
+function renderMarkets(direction = "") {
+  const selector = document.getElementById("market-selector");
+  if (selector) {
+    selector.className = ("market-selector market-carousel " + (direction ? "slide-" + direction : "")).trim();
+    if (direction) window.setTimeout(() => selector.classList.remove("slide-" + direction), 360);
+  }
+  document.getElementById("market-selector").innerHTML = `
+    <button class="market-cycle-button cycle-prev" data-market-cycle="-1" aria-label="Previous market">&lsaquo;</button>
+    <div class="market-carousel-stage">
+      ${Object.entries(MARKETS).map(([marketId, market]) => {
+        const available = isMarketAvailable(marketId);
+        const position = marketCarouselPosition(marketId);
+        return `<button class="market-card carousel-market ${position} ${selectedMarket === marketId ? "active" : ""} ${available ? "" : "locked"}" data-market="${marketId}" ${available ? "" : "disabled"}>
+          <img class="market-portrait" src="${market.portrait}" alt="${market.contact}">
+          <span class="market-copy">
+            <span class="market-contact">${market.contact}</span>
+            <strong>${market.name}</strong>
+            <small>${market.description}</small>
+            <span class="market-risk">${available
+              ? `Permanent trade // total C${formatNumber(state.tradeStats.byMarket[marketId])}`
+              : `LOCKED // ${market.unlockHint}`}</span>
+          </span>
+        </button>`;
+      }).join("")}
+    </div>
+    <button class="market-cycle-button cycle-next" data-market-cycle="1" aria-label="Next market">&rsaquo;</button>
+  `;
 
   const signalProfile = MARKET_SIGNALS[selectedMarket];
   const signals = state.marketSignals?.[selectedMarket] || {};
@@ -5308,13 +6440,14 @@ function renderMarkets() {
   ).map(([cropId, crop]) => {
     const fluctuation = state.marketFluctuation[cropId];
     const demand = cropDemandMultiplier(cropId, selectedMarket);
-    const totalTrend = fluctuation * demand * cropEventMultiplier(cropId);
+    const scheduleBoost = scheduleCropEventMultiplier(cropId, selectedMarket);
+    const totalTrend = fluctuation * demand * scheduleBoost * cropEventMultiplier(cropId);
     const delta = Math.round((totalTrend - 1) * 100);
     const trendClass = delta > 0 ? "up" : delta < 0 ? "down" : "";
     return `<div class="price-cell" style="--crop-color:${crop.color}">
       <header><img src="${crop.icon}" alt=""><strong>${crop.name}</strong></header>
-      <span class="quote">₡${formatNumber(getQuote(cropId))}</span>
-      <span class="trend ${trendClass}">${delta >= 0 ? "▲" : "▼"} ${Math.abs(delta)}% TODAY</span>
+      <span class="quote">C${formatNumber(getQuote(cropId))}</span>
+      <span class="trend ${trendClass}">${delta >= 0 ? "UP" : "DOWN"} ${Math.abs(delta)}% TODAY</span>
       <span class="demand-note">${cropDemandNote(cropId, selectedMarket)}</span>
     </div>`;
   }).join("");
@@ -5324,7 +6457,7 @@ function renderMarkets() {
 
 function renderInventory() {
   const inventoryList = document.getElementById("inventory-list");
-  const count = state.inventory.reduce((sum, batch) => sum + batch.qty, 0);
+  const count = state.inventory.reduce((sum, batch) => sum + Math.max(0, Number(batch.qty) || 0), 0);
   document.getElementById("inventory-summary").innerHTML = `
     <span>在庫 ${count} / 累計販売 ${state.tradeStats.unitsSold}</span>
     <strong>₡${formatNumber(state.tradeStats.revenue)} VOLUME</strong>`;
@@ -5336,13 +6469,14 @@ function renderInventory() {
 
   inventoryList.innerHTML = state.inventory.map((batch) => {
     const crop = CROPS[batch.crop];
-    const qty = Math.min(batch.qty, saleQuantities[batch.id] || 1);
+    const batchQty = Math.max(0, Number(batch.qty) || 0);
+    const qty = Math.min(batchQty, saleQuantities[batch.id] || 1);
     const unitPrice = getUnitPrice(batch);
     const accepted = MARKETS[selectedMarket].accepts.includes(batch.crop);
     return `<div class="inventory-row" style="--crop-color:${crop.color};--quality-color:${QUALITY[batch.quality].color}">
       <div class="inventory-crop">
         <span class="crop-glyph"><img src="${crop.icon}" alt=""></span>
-        <span><strong>${crop.name} x${batch.qty}</strong><small>${batch.degraded ? "劣化品 / 売値50%" : "FRESH HARVEST"}</small></span>
+        <span><strong>${crop.name} x${batchQty}</strong><small>${batch.degraded ? "劣化品 / 売値50%" : "FRESH HARVEST"}</small></span>
       </div>
       <div class="quality-cell"><span class="quality-badge">${batch.quality}</span></div>
       <div class="age-cell"><span class="inventory-label">AGE</span><br><strong>${batch.age} DAY</strong></div>
@@ -5373,9 +6507,13 @@ function renderShop() {
     </article>
   `;}).join("");
 
-  const hardwareCards = Object.entries(EQUIPMENT).filter(([itemId]) => itemId !== "support_robot").map(([itemId, item]) => {
+  const hardwareCards = Object.entries(EQUIPMENT).map(([itemId, item]) => {
     const available = isUnlocked("shop_item", itemId);
-    const owned = (itemId === "filter" && state.equipment.filter) || (itemId === "fridge" && state.equipment.fridge);
+    const owned = (itemId === "filter" && state.equipment.filter)
+      || (itemId === "fridge" && state.equipment.fridge)
+      || (itemId === "support_os_harvest" && state.supportOS?.harvest)
+      || (itemId === "support_os_planting" && state.supportOS?.planting)
+      || (itemId === "support_os_cleaning" && state.supportOS?.cleaning);
     const nutrientFull = itemId === "nutrient" && state.nutrient >= state.nutrientCapacity;
     let price = item.basePrice;
     if (itemId === "water") price = waterPackPrice();
@@ -5403,11 +6541,11 @@ function renderShop() {
   document.getElementById("equipment-shop").innerHTML = `
     <article class="shop-card lineup-card">
       <div class="shop-glyph"><img src="${text("procurement_refresh_icon", "assets/icons/seed.webp")}" alt=""></div>
-      <h3>タグ付き在庫更新</h3>
-      <p>Mara searches alternate equipment routes. Performance tags change after each refresh.</p>
+      <h3>${text("procurement_refresh_title", "タグ付き在庫更新")}</h3>
+      <p>${text("procurement_refresh_copy", "Mara searches alternate equipment routes. Performance tags change after each refresh.")}</p>
       <footer>
         <span class="shop-price">₡${PROCUREMENT_REROLL_FEE}</span>
-        <button class="buy-button" data-refresh-procurement ${state.money < PROCUREMENT_REROLL_FEE ? "disabled" : ""}>更新</button>
+        <button class="buy-button" data-refresh-procurement ${state.money < PROCUREMENT_REROLL_FEE ? "disabled" : ""}>${text("procurement_refresh_button", "更新")}</button>
       </footer>
     </article>${hardwareCards}`;
 }
@@ -5492,11 +6630,14 @@ function render() {
   document.querySelector('[data-tab="market"]')?.toggleAttribute("disabled", !state.marketTabUnlocked);
   document.querySelector('[data-tab="shop"]')?.classList.toggle("locked", !state.shopUnlocked);
   document.querySelector('[data-tab="shop"]')?.toggleAttribute("disabled", !state.shopUnlocked);
+  document.querySelector('[data-tab="schedule"]')?.classList.toggle("locked", !state.shopUnlocked);
+  document.querySelector('[data-tab="schedule"]')?.toggleAttribute("disabled", !state.shopUnlocked);
   document.querySelector('[data-tab="broker"]')?.classList.toggle("locked", !state.brokerUnlocked);
   document.querySelector('[data-tab="broker"]')?.toggleAttribute("disabled", !state.brokerUnlocked);
   renderHeader();
   renderFarm();
   renderMarkets();
+  renderSchedule();
   renderShop();
   renderBroker();
   renderRadio();
@@ -5514,6 +6655,7 @@ function renderRuntime() {
   } else {
     updateFarmProgress();
   }
+  if (document.getElementById("schedule-screen")?.classList.contains("active")) renderSchedule();
   if (document.getElementById("radio-screen")?.classList.contains("active")) renderRadio();
   renderTimeControl();
   syncLoopAudio();
@@ -5543,6 +6685,20 @@ function renderTimeControl() {
 
 function bindEvents() {
   document.addEventListener("click", (event) => {
+    const scheduleEntryAction = event.target.closest("[data-schedule-entry]");
+    if (scheduleEntryAction) {
+      event.preventDefault();
+      showScheduleEntryDetail(scheduleEntryAction.dataset.scheduleEntry, scheduleEntryAction);
+      return;
+    }
+
+    const scheduleRerollAction = event.target.closest("[data-reroll-schedule]");
+    if (scheduleRerollAction) {
+      event.preventDefault();
+      requestScheduleReroll();
+      return;
+    }
+
     const day30ResultAction = event.target.closest("[data-day30-result]");
     if (day30ResultAction) {
       event.preventDefault();
@@ -5619,6 +6775,13 @@ function bindEvents() {
     if (radioProgram) {
       event.preventDefault();
       selectRadioProgram(radioProgram.dataset.radioProgram);
+      return;
+    }
+
+    const automationControl = event.target.closest("[data-auto-action]");
+    if (automationControl) {
+      event.preventDefault();
+      handleAutomationControl(automationControl);
       return;
     }
 
@@ -5704,7 +6867,16 @@ function bindEvents() {
       if (!isOpaqueEquipmentPointer(deviceButton, event)) return;
       const device = currentFloorDevices().find((entry) => entry.id === deviceButton.dataset.selectDevice);
       if (device?.type === "support_robot") {
-        triggerComms("support_robot_os_required");
+        showSupportRobotPanel(device);
+        if (!hasAnySupportOS()) triggerComms("support_robot_os_required");
+        return;
+      }
+      if (device?.type === "procurement_terminal") {
+        showProcurementTerminal();
+        return;
+      }
+      if (device?.type === "shipping_hatch") {
+        showShippingTerminal();
         return;
       }
       if (device) setStatus(`${FLOOR_DEVICES[device.type].name}が低く唸っています。周囲の空気だけが少し違う速度で動いています。`);
@@ -5734,6 +6906,13 @@ function bindEvents() {
 
     const contractButton = event.target.closest("[data-contract-property]");
     if (contractButton) contractProperty(contractButton.dataset.contractProperty);
+    const marketCycle = event.target.closest("[data-market-cycle]");
+    if (marketCycle) {
+      event.preventDefault();
+      cycleMarket(Number(marketCycle.dataset.marketCycle) || 1);
+      return;
+    }
+
     const market = event.target.closest("[data-market]");
     if (market) {
       if (!isMarketAvailable(market.dataset.market)) {
@@ -5742,6 +6921,7 @@ function bindEvents() {
       }
       selectedMarket = market.dataset.market;
       playSound("market_select", 0.18);
+      hapticFeedback(8);
       renderMarkets();
     }
 
@@ -6110,10 +7290,11 @@ function bindEvents() {
   document.getElementById("refresh-properties").addEventListener("click", refreshPropertyListings);
   document.getElementById("reset-button").addEventListener("click", requestExitToStart);
   document.getElementById("modal-reset").addEventListener("click", requestNewGame);
-  document.getElementById("start-continue").addEventListener("click", closeStartScreen);
-  document.getElementById("start-day30").addEventListener("click", requestSelectedModeGame);
-  document.getElementById("start-new").addEventListener("click", requestNewGame);
+  document.getElementById("start-continue").addEventListener("click", handleStartPrimary);
+  document.getElementById("start-day30")?.addEventListener("click", requestSelectedModeGame);
+  document.getElementById("start-new").addEventListener("click", requestSelectedModeGame);
   document.getElementById("start-mode-toggle").addEventListener("click", toggleStartModeView);
+  document.getElementById("start-title")?.addEventListener("click", handleStartTitleTap);
   document.getElementById("record-export-button").addEventListener("click", requestRecordExport);
   document.getElementById("confirm-cancel").addEventListener("click", closeConfirmWidget);
   document.getElementById("confirm-ok").addEventListener("click", confirmWidgetAction);
@@ -6146,8 +7327,9 @@ function bindEvents() {
     if (event.key === "1") switchTab("farm");
     if (event.key === "2") switchTab("market");
     if (event.key === "3") switchTab("shop");
-    if (event.key === "4") switchTab("broker");
-    if (event.key === "5") switchTab("radio");
+    if (event.key === "4") switchTab("schedule");
+    if (event.key === "5") switchTab("broker");
+    if (event.key === "6") switchTab("radio");
   });
 }
 

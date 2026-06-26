@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=106">
+    <link rel="stylesheet" href="styles.css?v=120">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -70,8 +70,9 @@
       <button class="tab active" data-tab="farm"><span>01</span>栽培区画</button>
       <button class="tab" data-tab="market"><span>02</span>闇市場</button>
       <button class="tab" data-tab="shop"><span>03</span>調達端末</button>
-      <button class="tab" data-tab="broker"><span>04</span>不動産ブローカー</button>
-      <button class="tab" data-tab="radio"><span>05</span>ラジオ</button>
+      <button class="tab" data-tab="schedule"><span>04</span>予定表</button>
+      <button class="tab" data-tab="broker"><span>05</span>不動産ブローカー</button>
+      <button class="tab" data-tab="radio"><span>06</span>ラジオ</button>
     </nav>
 
     <main>
@@ -132,13 +133,34 @@
         </div>
         <div class="market-selector" id="market-selector"></div>
         <div class="price-board">
-          <div class="section-label"><span>LIVE QUOTES</span><small>本日の単価 / B品質</small></div>
+          <div class="section-label"><span>LIVE QUOTES</span><small>TODAY UNIT / B QUALITY</small></div>
           <div class="market-signal-row" id="market-signal-row"></div>
           <div class="price-grid" id="price-grid"></div>
         </div>
         <div class="inventory-panel">
-          <div class="section-label"><span>HARVEST INVENTORY</span><small>収穫物を選んで売却</small></div>
+          <div class="section-label"><span>HARVEST INVENTORY</span><small>SELECT STOCK TO SELL</small></div>
           <div id="inventory-list"></div>
+        </div>
+      </section>
+
+
+      <section class="screen" id="schedule-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">LOWNET RUMOR CALENDAR</p>
+            <h2>月間スケジュール</h2>
+          </div>
+          <div class="heading-stats" id="schedule-summary"></div>
+        </div>
+        <div class="schedule-layout">
+          <section class="schedule-console">
+            <div class="section-label"><span>MONTHLY GRID</span><small>聞き取った噂の一覧</small></div>
+            <div class="schedule-calendar" id="schedule-calendar"></div>
+          </section>
+          <aside class="schedule-briefing">
+            <div class="section-label"><span>OPERATOR NOTES</span><small>噂に対する主人公のコメント</small></div>
+            <div id="schedule-briefing-list"></div>
+          </aside>
         </div>
       </section>
 
@@ -235,7 +257,6 @@
       <div class="start-status" id="start-status">SAVE SIGNAL SCAN...</div>
       <div class="start-actions">
         <button class="primary-button" id="start-continue">開始</button>
-        <button class="primary-button start-day30-button" id="start-day30">DAY30モード</button>
         <button class="secondary-button" id="start-new">新規開始</button>
       </div>
       <div class="start-records">
@@ -319,6 +340,6 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=110"></script>
+  <script src="game.js?v=147"></script>
 </body>
 </html>
