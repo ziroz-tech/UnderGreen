@@ -2,10 +2,15 @@ id,name,icon,sprite,basePrice,color,description
 water,水 10単位,assets/icons/water.webp,,20,#48dbea,作物の生育に必要。価格は配給状況で変動。
 nutrient,養液 10単位,assets/icons/nutrient.webp,,40,#f5d65b,品質維持に必要。タンク容量を超えて保管できない。
 pod,栽培ポッド,assets/icons/seed.webp,assets/equipment/pod-empty.png,120,#48dbea,1苗用。植え付け時の水・養液投入だけで収穫まで管理できる。
-box,栽培ボックス,assets/icons/fridge.webp,assets/equipment/box-empty-grounded-v4.png,720,#f5d65b,6株用。一括投入式で管理コストが低い中型設備。
+box,栽培ボックス,assets/icons/fridge.webp,assets/equipment/box-empty-gridfit-v1.png,720,#f5d65b,6株用。一括投入式で管理コストが低い中型設備。
 light,区画LEDライト,assets/icons/led.webp,assets/equipment/light-iso-tall-v2.png,180,#f5d65b,1マス使用。周囲2マスのポッド・ボックスに照明効果を与える。維持費+4。
 fan,区画循環ファン,assets/icons/fan.webp,assets/equipment/fan-iso-tall-v2.png,150,#48dbea,1マス使用。周囲2マスのポッド・ボックスに送風効果を与える。維持費+3。
 tank,養液タンク,assets/icons/tank.webp,,250,#91d9ff,養液の最大備蓄量を30増加。
 filter,水フィルター,assets/icons/filter.webp,,500,#48dbea,水の購入価格を25%削減。効果は永続。
 fridge,冷蔵保管箱,assets/icons/fridge.webp,,400,#b5d5ff,収穫物が劣化するまでの日数を3日から6日に延長。
-support_robot,サポートロボット,assets/icons/supportRobot.webp,assets/characters/supportRobot-iso-leftdown.png,0,#48dbea,追加OSが必要な補助ロボット。今は見守っているだけ。
+support_robot,サポートロボット,assets/icons/supportRobot.webp,assets/characters/supportRobot-iso-leftdown.png,900,#48dbea,追加OSで作業を担当できる補助ロボット。個体ごとに特技と性格が異なる。
+procurement_terminal,設置型調達端末,assets/equipment/procurement-terminal-iso-v1.png,assets/equipment/procurement-terminal-iso-v1.png,520,#72ffb8,栽培区画に置くと、範囲内のサポートロボットが作物ごとに指定した種を自動購入できる。
+shipping_hatch,出荷用搬出口,assets/equipment/shipping-hatch-iso-v1.png,assets/equipment/shipping-hatch-iso-v1.png,680,#f5d65b,栽培区画に置くと、範囲内のサポートロボットが作物ごとに指定した出荷を自動実行できる。
+support_os_harvest,収穫OS,assets/icons/support-os-harvest-v1.png,,650,#72ffb8,サポートロボットが範囲内の収穫可能作物を一株ずつ回収できる。
+support_os_planting,植え付けOS,assets/icons/support-os-planting-v1.png,,620,#72ffb8,サポートロボットが範囲内の空きスロットへ指定した種を一株ずつ植え付ける。
+support_os_cleaning,お掃除OS,assets/icons/support-os-cleaning-v1.png,,560,#f5d65b,サポートロボットが範囲内の汚れた設備を自動清掃できる。自分自身も清掃対象になる。

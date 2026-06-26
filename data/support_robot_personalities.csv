@@ -1,0 +1,5 @@
+id,name,rangeMod,fuelMod,speedMod,description
+steady,堅実,1,0.9,1,燃費がよく安定して動く。
+eager,前のめり,0.9,1.15,1.25,範囲は狭いが作業が速い。
+patrol,巡回好き,1.4,1.1,0.9,広めに見回るが少しのんびり。
+careful,慎重,1.15,0.85,0.85,省エネで広く見られるが手は遅い。

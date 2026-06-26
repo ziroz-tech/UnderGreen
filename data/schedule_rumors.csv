@@ -1,0 +1,11 @@
+id,type,startDay,duration,marketId,axes,cropIds,strength,chance,jitter,signalBoost,priceBoost,title,rumor,comment
+lower_ration_delay,basic,4,2,lower,hunger,lettuce,mid,1,0,0.82,1.65,下層配給の遅延,物資用エレベーターの定期点検で配給が遅れるらしい。,レタスが高く売れるかもしれない。
+field_survey,basic,10,3,lower,hunger,lettuce,high,1,0,0.9,1.85,大規模遠征調査,地表への大規模遠征調査で携行食が大量に持ち出されるらしい。,レタスが高く売れるかもしれない。
+admin_audit_stress,basic,14,2,medical,care,chamomile,mid,1,0,0.84,1.55,管理局抜き打ち査察,管理局で抜き打ち査察が入り、職員の夜間待機が増えるらしい。,カモミールが高く売れるかもしれない。
+upper_banquet,basic,19,3,upper,presentation,strawberry,mid,1,0,0.84,1.55,上層祝宴予約,上層区画で非公式の祝宴予約が重なっているらしい。,イチゴが高く売れるかもしれない。
+supply_relay,basic,24,2,rebel,disruption,aconite,mid,1,0,0.84,1.55,撹乱素材の調達噂,反体制派の工作班が撹乱用素材を集めているらしい。,トリカブトが高く売れるかもしれない。
+lower_supplement_supply,basic,28,3,lower,hunger|nutrition,basil,mid,1,0,0.86,1.65,下層への臨時配給,上層での残飯処理として、下層への食糧供給が増えるらしい。,バジルが高く売れるかもしれない。
+health_review,rare,7,2,lower,nutrition,spinach,rare,0.45,2,0.92,1.65,定例健康評価の実施,全市民に健康状態の査定が入るらしい。,ホウレンソウが高く売れるかもしれない。
+clinic_overflow,rare,16,3,medical,remedy,rosemary,rare,0.45,2,0.94,1.65,臨時診療ブロック,医療区画で臨時診療ブロックが開設されるらしい。,ローズマリーが高く売れるかもしれない。
+shelter_delegation,rare,22,2,upper,novelty,melon,rare,0.45,2,0.94,1.65,他シェルターからの使節団来訪,他シェルターからの使節団が上層区画を視察するらしい。,培養メロンが高く売れるかもしれない。
+sabotage_order,rare,26,2,rebel,disruption,aconite,rare,0.45,2,0.94,1.65,撹乱作戦の影,反体制派の一部が大きな撹乱作戦を準備しているらしい。,トリカブトが高く売れるかもしれない。

@@ -1,5 +1,5 @@
 id,axisA,axisALabel,axisADescription,axisB,axisBLabel,axisBDescription
-lower,hunger,空腹度,空腹度が高い日は軽く早く回る葉物が求められる,nutrition,栄養需要,栄養需要が高い日は濃い緑葉や食事価値が評価される
-medical,remedy,治療需要,治療需要が高い日は薬効が読める草本が強い,purity,清浄性,清浄性が重視される日は安定品質と汚染リスクの低さが評価される
-upper,novelty,希少性,希少性が高い日は珍しい果実や話題性が買われる,presentation,見栄え,見栄え需要が高い日は贈答向けの形と色が評価される
-rebel,supply,補給需要,補給需要が高い日は腹を満たす作物が強い,disruption,工作需要,工作需要が高い日は危険物や撹乱用途の素材が買われる
+lower,hunger,空腹度,空腹度が高い日は葉物が求められる,nutrition,栄養需要,栄養需要が高い日は濃い緑葉が評価される
+medical,remedy,治療需要,治療需要が高い日は薬効を持つ草本が強い,care,ケア需要,ケア需要が高い日は患者食や鎮静用の作物が評価される
+upper,novelty,希少性,希少性が高い日は珍しい果実が買われる,presentation,見栄え,見栄え需要が高い日は形と色が評価される
+rebel,supply,補給需要,補給需要が高い日は腹を満たす作物が強い,disruption,工作需要,工作需要が高い日は危険物や撹乱素材が買われる

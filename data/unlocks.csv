@@ -22,3 +22,9 @@ market_medical,market,medical,cropSold:basil>=3|revenue>=1400,market_medical_unl
 broker_access,broker,broker,unit:pod>=4|unitPlaced:pod>=4,property_broker_unlocked,追加PODを3台購入して全4台を設置すると物件紹介が届きます,false
 market_upper,market,upper,cropSold:tomato>=4|unitsSold>=25|revenue>=4200,market_upper_unlocked,トマトを4株売り累計25株販売と売上4200で接続,false
 market_rebel,market,rebel,marketRevenue:lower>=4000|cropSold:tomato>=4,market_rebel_unlocked,下層へ4000以上流しトマトを4株売ると接触があります,false
+shop_support_robot,shop_item,support_robot,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に追加機を購入できます,false
+shop_procurement_terminal,shop_item,procurement_terminal,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に設置型調達端末を購入できます,false
+shop_shipping_hatch,shop_item,shipping_hatch,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に出荷用搬出口を購入できます,false
+shop_support_os_harvest,shop_item,support_os_harvest,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に収穫OSを購入できます,false
+shop_support_os_cleaning,shop_item,support_os_cleaning,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後にお掃除OSを購入できます,false
+shop_support_os_planting,shop_item,support_os_planting,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に植え付けOSを購入できます,false
