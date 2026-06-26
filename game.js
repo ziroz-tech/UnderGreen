@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 let CROPS = {};
 let MARKETS = {};
@@ -35,10 +35,11 @@ const QUALITY = {
 const RESOURCE_CONSUMPTION_RATE = 1 / 6;
 const REALTIME_DAY_MS = 20000;
 const WITHER_DAYS = 1;
-const SAVE_KEY = "undergreen-save-v16";
+const SAVE_KEY = "undergreen-save-v17";
 const SAVE_BACKUP_KEY = `${SAVE_KEY}-backup`;
-const LEGACY_SAVE_KEYS = Array.from({ length: 15 }, (_, index) => `undergreen-save-v${15 - index}`);
+const LEGACY_SAVE_KEYS = [];
 const DAY30_RECORDS_KEY = "undergreen-day30-records-v1";
+const DAY60_RECORDS_KEY = "undergreen-day60-records-v1";
 const FREE_RECORDS_KEY = "undergreen-free-records-v1";
 const START_MODE_PREF_KEY = "undergreen-start-mode-view-v1";
 const PUBLIC_GAME_URL = "https://ziroz-tech.github.io/UnderGreen/";
@@ -46,10 +47,53 @@ const GOOGLE_FORM_PREFILL_URL = "https://docs.google.com/forms/d/1DhYFy45WvRujbb
 const GOOGLE_FORM_FIELDS = {
   recordJson: "entry.1523070449",
   day30Count: "",
+  day60Count: "",
   freeCount: "",
   latestRevenue: "",
   latestTitles: ""
 };
+const PLAY_MODES = {
+  day30: {
+    key: "day30",
+    label: "DAY30モード",
+    shortLabel: "DAY30",
+    recordsTitle: "DAY30 RECORDS",
+    recordEmpty: "まだDAY30モードの記録はありません。",
+    storageKey: DAY30_RECORDS_KEY,
+    limit: 30,
+    startKicker: "DAY30 CHALLENGE",
+    startTitle: "DAY30モード",
+    startCopy: "現在のセーブデータを上書きして、DAY30終了時点の記録を残す競技モードを開始します。",
+    startConfirm: "DAY30開始"
+  },
+  day60: {
+    key: "day60",
+    label: "DAY60モード",
+    shortLabel: "DAY60",
+    recordsTitle: "DAY60 RECORDS",
+    recordEmpty: "まだDAY60モードの記録はありません。",
+    storageKey: DAY60_RECORDS_KEY,
+    limit: 60,
+    startKicker: "DAY60 CHALLENGE",
+    startTitle: "DAY60モード",
+    startCopy: "現在のセーブデータを上書きして、DAY60終了時点の記録を残す長期チャレンジモードを開始します。",
+    startConfirm: "DAY60開始"
+  },
+  free: {
+    key: "free",
+    label: "フリーモード",
+    shortLabel: "FREE",
+    recordsTitle: "FREE MODE RECORDS",
+    recordEmpty: "フリーモードの記録はまだありません。",
+    storageKey: FREE_RECORDS_KEY,
+    limit: null,
+    startKicker: "FREE OPERATION",
+    startTitle: "フリーモード",
+    startCopy: "期限なしで、現在のセーブデータを上書きしてゆったり遊ぶモードを開始します。",
+    startConfirm: "フリー開始"
+  }
+};
+const START_MODE_SEQUENCE = ["day30", "day60", "free"];
 const PROPERTY_REROLL_FEE = 100;
 const PROCUREMENT_REROLL_FEE = 80;
 const PROPERTY_LISTING_COUNT = 4;
@@ -1502,8 +1546,36 @@ function saveGame() {
   return saved;
 }
 
+function playModeConfig(mode = "day30") {
+  return PLAY_MODES[mode] || PLAY_MODES.day30;
+}
+
+function playModeLimit(mode = state?.mode) {
+  const config = PLAY_MODES[mode];
+  if (!config) return Number.POSITIVE_INFINITY;
+  const limit = config.limit;
+  return Number.isFinite(Number(limit)) ? Number(limit) : Number.POSITIVE_INFINITY;
+}
+
+function isTimedPlayMode(mode = state?.mode) {
+  const config = PLAY_MODES[mode];
+  return Boolean(config && Number.isFinite(Number(config.limit)));
+}
+
+function playModeLabel(mode = state?.mode) {
+  return PLAY_MODES[mode]?.label || "通常モード";
+}
+
+function playModeShortLabel(mode = state?.mode) {
+  return PLAY_MODES[mode]?.shortLabel || "NORMAL";
+}
+
+function validPlayMode(mode, fallback = "day30") {
+  return PLAY_MODES[mode] ? mode : fallback;
+}
+
 function recordStorageKey(mode = "day30") {
-  return mode === "free" ? FREE_RECORDS_KEY : DAY30_RECORDS_KEY;
+  return playModeConfig(mode).storageKey;
 }
 
 function readPlayRecords(mode = "day30") {
@@ -1524,12 +1596,20 @@ function readDay30Records() {
   return readPlayRecords("day30");
 }
 
+function readDay60Records() {
+  return readPlayRecords("day60");
+}
+
 function readFreeRecords() {
   return readPlayRecords("free");
 }
 
 function saveDay30Records(records) {
   savePlayRecords("day30", records);
+}
+
+function saveDay60Records(records) {
+  savePlayRecords("day60", records);
 }
 
 function saveFreeRecords(records) {
@@ -2203,6 +2283,16 @@ function scheduleClampDay(day) {
   return Math.max(1, Math.min(SCHEDULE_DAYS, Math.round(Number(day) || 1)));
 }
 
+function scheduleCalendarDay(day = state?.day || 1) {
+  const absoluteDay = Math.max(1, Math.round(Number(day) || 1));
+  return ((absoluteDay - 1) % SCHEDULE_DAYS) + 1;
+}
+
+function shouldRefreshMonthlyScheduleForDay(day = state?.day || 1) {
+  const absoluteDay = Math.max(1, Math.round(Number(day) || 1));
+  return absoluteDay > 1 && scheduleCalendarDay(absoluteDay) === 1;
+}
+
 function scheduleJitterDay(day, range = 2) {
   return scheduleClampDay(day + Math.floor(Math.random() * (range * 2 + 1)) - range);
 }
@@ -2288,7 +2378,7 @@ function scheduleCropEventMultiplier(cropId, marketId = selectedMarket) {
 }
 
 function activeScheduleEntries(day = state.day) {
-  return scheduleEntriesForDay(Number(day) || 1);
+  return scheduleEntriesForDay(scheduleCalendarDay(day));
 }
 
 function applyScheduleMarketSignals() {
@@ -2427,8 +2517,9 @@ function renderSchedule() {
   calendar.innerHTML = Array.from({ length: SCHEDULE_DAYS }, (_, index) => {
     const day = index + 1;
     const dayEntries = scheduleEntriesForDay(day);
-    const isToday = day === Math.min(SCHEDULE_DAYS, Math.max(1, Number(state.day) || 1));
-    const isPast = day < (Number(state.day) || 1);
+    const calendarToday = scheduleCalendarDay(state.day);
+    const isToday = day === calendarToday;
+    const isPast = day < calendarToday;
     const dayClass = 'schedule-day ' + (isToday ? 'today ' : '') + (isPast ? 'past ' : '') + (dayEntries.length ? 'has-rumor' : '');
     const chips = dayEntries.map((entry) => '<button class="schedule-chip ' + (entry.strength || 'mid') + '" data-schedule-entry="' + escapeHtml(entry.id) + '" type="button">' + escapeHtml(scheduleStrengthLabel(entry.strength)) + ' // ' + escapeHtml(scheduleCropLabel(entry)) + '</button>').join('');
     return '<article class="' + dayClass.trim() + '"><header><span>DAY</span><strong>' + String(day).padStart(2, "0") + '</strong></header><div class="schedule-day-events">' + chips + '</div></article>';
@@ -3353,7 +3444,9 @@ function day30Titles(summary) {
 }
 
 function createDay30Summary(options = {}) {
-  const recordMode = options.mode || state.mode || "day30";
+  const recordMode = validPlayMode(options.mode || state.mode || "day30");
+  const modeConfig = playModeConfig(recordMode);
+  const modeLimit = playModeLimit(recordMode);
   const byCrop = { ...(state.tradeStats?.byCrop || {}) };
   const byMarket = { ...(state.tradeStats?.byMarket || {}) };
   const byMarketQty = { ...(state.tradeStats?.byMarketQty || {}) };
@@ -3362,14 +3455,15 @@ function createDay30Summary(options = {}) {
   const [topMarketQtyId, topMarketQty] = topEntry(byMarketQty);
   const unitsSold = Number(state.tradeStats?.unitsSold) || 0;
   const revenue = Math.round(Number(state.tradeStats?.revenue) || 0);
-  const completed = Boolean(options.completed ?? (recordMode === "day30" && state.day > 30));
-  const dayLimit = recordMode === "day30" ? 30 : 9999;
-  const fallbackDay = completed && recordMode === "day30" ? 30 : state.day;
-  const playedDays = Math.max(1, Math.min(dayLimit, Number(options.playedDays ?? fallbackDay) || 1));
+  const completed = Boolean(options.completed ?? (Number.isFinite(modeLimit) && state.day > modeLimit));
+  const fallbackDay = completed && Number.isFinite(modeLimit) ? modeLimit : state.day;
+  const playedDays = Math.max(1, Math.min(modeLimit, Number(options.playedDays ?? fallbackDay) || 1));
   const records = readPlayRecords(recordMode);
   const summary = {
-    id: options.id || makeId(recordMode === "free" ? "free" : "day30"),
+    id: options.id || makeId(recordMode),
     mode: recordMode,
+    modeLabel: modeConfig.label,
+    modeLimit: Number.isFinite(modeLimit) ? modeLimit : null,
     recordedAt: new Date().toISOString(),
     runLabel: `RUN ${String(records.length + 1).padStart(2, "0")}`,
     playerName: options.playerName || "未記名",
@@ -3397,7 +3491,6 @@ function createDay30Summary(options = {}) {
   summary.titles = day30Titles(summary);
   return summary;
 }
-
 function recordDay30Run(options = {}) {
   if (state.day30Recorded) return null;
   const summary = createDay30Summary(options);
@@ -3412,7 +3505,7 @@ function recordDay30Run(options = {}) {
 
 function updateDay30RecordName(recordId, playerName) {
   const name = String(playerName || "").trim() || "未記名";
-  for (const mode of ["day30", "free"]) {
+  for (const mode of START_MODE_SEQUENCE) {
     const records = readPlayRecords(mode);
     const record = records.find((entry) => entry.id === recordId);
     if (record) {
@@ -5304,12 +5397,16 @@ function processDayBoundary() {
   else state.consecutiveDebtDays = 0;
 
   state.day += 1;
-  if (state.mode === "day30" && state.day > 30) {
-    finalizeDay30Run({ completed: true, playedDays: 30 });
+  const modeLimit = playModeLimit(state.mode);
+  if (Number.isFinite(modeLimit) && state.day > modeLimit) {
+    finalizeDay30Run({ completed: true, playedDays: modeLimit, mode: state.mode });
     return;
   }
+  if (shouldRefreshMonthlyScheduleForDay(state.day)) {
+    state.monthlySchedule = generateMonthlySchedule();
+  }
   const operationFailed = state.money <= -500 || state.consecutiveDebtDays >= 3;
-  if (operationFailed && state.mode === "day30") {
+  if (operationFailed && isTimedPlayMode(state.mode)) {
     finalizeDay30Run({ completed: false, playedDays: state.day, mode: state.mode });
     return;
   }
@@ -5397,7 +5494,7 @@ function reportMarkup() {
   const planted = activePlants().length;
   const inventoryCount = state.inventory.reduce((sum, item) => sum + item.qty, 0);
   return `<div class="modal-report">
-    <div><span>到達日</span><strong>DAY ${Math.min(state.day, 30)}</strong></div>
+    <div><span>到達日</span><strong>DAY ${Math.min(state.day, playModeLimit(state.mode))}</strong></div>
     <div><span>所持金</span><strong>₡${formatNumber(state.money)}</strong></div>
     <div><span>栽培設備</span><strong>P${unitCount("pod")} / B${unitCount("box")}</strong></div>
     <div><span>栽培中 / 在庫</span><strong>${planted} / ${inventoryCount}</strong></div>
@@ -5427,8 +5524,7 @@ function finalizeDay30Run({ completed = false, playedDays = state.day, mode = st
     mode,
     id: state.day30RecordId || undefined
   });
-  if (summary.mode === "free") setStartModeView("free");
-  else if (summary.mode === "day30") setStartModeView("day30");
+  setStartModeView(validPlayMode(summary.mode, "day30"));
   pendingDay30RecordId = summary.id;
   showDay30Report(summary);
   saveGame();
@@ -5453,7 +5549,7 @@ function publicGameUrl() {
 
 function currentDay30Record() {
   if (!pendingDay30RecordId) return null;
-  for (const mode of ["day30", "free"]) {
+  for (const mode of START_MODE_SEQUENCE) {
     const record = readPlayRecords(mode).find((entry) => entry.id === pendingDay30RecordId);
     if (record) return record;
   }
@@ -5466,7 +5562,7 @@ function currentResultSummary() {
     id: pendingDay30RecordId || undefined,
     mode: state.mode || "day30",
     completed: state.ended,
-    playedDays: state.mode === "day30" ? Math.min(30, state.day) : state.day,
+    playedDays: Math.min(playModeLimit(state.mode), state.day),
     playerName: currentDay30PlayerName()
   });
 }
@@ -5490,7 +5586,7 @@ function openXShareDraft() {
 }
 
 function latestPlayRecordForExport() {
-  return [...readDay30Records(), ...readFreeRecords()]
+  return [...readDay30Records(), ...readDay60Records(), ...readFreeRecords()]
     .sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")))[0] || null;
 }
 
@@ -5500,6 +5596,7 @@ function googleFormExportPayload() {
   return {
     recordJson: JSON.stringify(records),
     day30Count: String(records.records.day30.length),
+    day60Count: String(records.records.day60.length),
     freeCount: String(records.records.free.length),
     latestRevenue: latest ? String(latest.revenue || 0) : "0",
     latestTitles: latest?.titles?.join(" / ") || ""
@@ -5535,8 +5632,10 @@ function openGoogleFormRecordExport() {
   toast("Google Form opened.");
 }
 function day30ReportMarkup(summary) {
+  const config = playModeConfig(summary.mode);
   const status = summary.completed ? "完走" : "途中終了";
-  return `<p class="modal-copy">DAY30モードの記録を保存しました。名前はこの端末の記録一覧に表示されます。</p>
+  const modeName = config.label;
+  return `<p class="modal-copy">${escapeHtml(modeName)}の記録を保存しました。名前はこの端末の記録一覧に表示されます。</p>
   <label class="day30-name-field">
     <span>PLAYER NAME</span>
     <input id="day30-player-name" type="text" maxlength="18" value="${escapeHtml(summary.playerName || "")}" placeholder="名前を入力">
@@ -5558,17 +5657,11 @@ function day30ReportMarkup(summary) {
     <button class="primary-button" data-day30-result="view">閲覧モード</button>
   </div>`;
 }
-
 function showDay30Report(summary) {
-  const isFreeResult = summary.mode === "free";
-  showModal("DAY30 RESULT", "DAY30モード終了", day30ReportMarkup(summary), false);
-  if (isFreeResult) {
-    document.getElementById("modal-kicker").textContent = "FREE RESULT";
-    document.getElementById("modal-title").textContent = "フリーモード終了";
-  }
+  const config = playModeConfig(summary.mode);
+  showModal(`${config.shortLabel} RESULT`, `${config.label}終了`, day30ReportMarkup(summary), false);
   document.getElementById("modal-reset").style.display = "none";
 }
-
 function showModal(kicker, title, content, canContinue, showReset = true, closeLabel = "続ける") {
   document.getElementById("modal-kicker").textContent = kicker;
   document.getElementById("modal-title").textContent = title;
@@ -5618,7 +5711,7 @@ function hasStartProgress() {
 
 function startSelectedModeGame() {
   if (startModeView === "free") startFreeGame();
-  else startDay30Game();
+  else startNewGame(startModeView);
 }
 
 function handleStartPrimary() {
@@ -5698,22 +5791,27 @@ function startDay30Game() {
   startNewGame("day30");
 }
 
+function startDay60Game() {
+  startNewGame("day60");
+}
+
 function startFreeGame() {
   startNewGame("free");
 }
 
 function selectedStartModeLabel() {
-  return startModeView === "free" ? "フリーモード" : "DAY30モード";
+  return playModeLabel(startModeView);
 }
 
 function setStartModeView(mode) {
-  startModeView = mode === "free" ? "free" : "day30";
+  startModeView = validPlayMode(mode, "day30");
   safeStorageSet(START_MODE_PREF_KEY, startModeView);
   updateStartScreen();
 }
 
 function toggleStartModeView() {
-  setStartModeView(startModeView === "free" ? "day30" : "free");
+  const index = START_MODE_SEQUENCE.indexOf(startModeView);
+  setStartModeView(START_MODE_SEQUENCE[(index + 1) % START_MODE_SEQUENCE.length]);
   playSound("start_mode_toggle", 0.12);
 }
 
@@ -5762,24 +5860,25 @@ function updateStartScreen() {
   const recordsTitle = document.getElementById("start-records-title");
   if (!status || !continueButton) return;
   const hasProgress = hasStartProgress();
+  const selectedConfig = playModeConfig(startModeView);
   const newButton = document.getElementById("start-new");
-  continueButton.textContent = hasProgress ? "続きから" : `${selectedStartModeLabel()}開始`;
+  continueButton.textContent = hasProgress ? "続きから" : `${selectedConfig.label}開始`;
   if (modeButton) {
     modeButton.hidden = true;
-    modeButton.textContent = selectedStartModeLabel();
+    modeButton.textContent = selectedConfig.label;
     modeButton.classList.toggle("free-mode", startModeView === "free");
+    modeButton.classList.toggle("day60-mode", startModeView === "day60");
   }
   if (newButton) {
     newButton.hidden = !hasProgress;
-    newButton.textContent = `${selectedStartModeLabel()}で新規開始`;
+    newButton.textContent = `${selectedConfig.label}で新規開始`;
   }
-  if (recordsTitle) recordsTitle.textContent = startModeView === "free" ? "FREE MODE RECORDS" : "DAY30 RECORDS";
+  if (recordsTitle) recordsTitle.textContent = selectedConfig.recordsTitle;
   status.textContent = hasProgress
-    ? `SAVE SIGNAL // ${state.mode === "day30" ? "DAY30" : state.mode === "free" ? "FREE" : "NORMAL"} // DAY ${String(state.day).padStart(2, "0")} // C${formatNumber(state.money)}`
-    : "NO SAVE SIGNAL // NEW OPERATION READY";
+    ? `SAVE SIGNAL // ${PLAY_MODES[state.mode] ? playModeShortLabel(state.mode) : "NORMAL"} // DAY ${String(state.day).padStart(2, "0")} // C${formatNumber(state.money)}`
+    : `NO SAVE SIGNAL // ${selectedConfig.shortLabel} READY`;
   renderDay30Records();
 }
-
 function renderDay30Records() {
   const list = document.getElementById("day30-record-list");
   const count = document.getElementById("day30-record-count");
@@ -5790,8 +5889,7 @@ function renderDay30Records() {
   if (!records.length) {
     const empty = document.createElement("p");
     empty.className = "day30-record-empty";
-    empty.textContent = "まだDAY30モードの記録はありません。";
-    if (startModeView === "free") empty.textContent = "フリーモードの記録はまだありません。";
+    empty.textContent = playModeConfig(startModeView).recordEmpty;
     list.appendChild(empty);
     return;
   }
@@ -5804,11 +5902,8 @@ function renderDay30Records() {
     const score = document.createElement("strong");
     score.textContent = `₡${formatNumber(record.revenue || 0)}`;
     const label = document.createElement("span");
-    const resultStatus = record.mode === "free" ? "終了" : null;
-    label.textContent = `${record.playerName || "未記名"} // ${record.completed ? "完走" : "途中終了"} DAY ${record.day || 0} // ${new Date(record.recordedAt).toLocaleDateString("ja-JP")}`;
-    if (resultStatus) {
-      label.textContent = `${record.playerName || "譛ｪ險伜錐"} // ${resultStatus} DAY ${record.day || 0} // ${new Date(record.recordedAt).toLocaleDateString("ja-JP")}`;
-    }
+    const resultStatus = record.mode === "free" ? "終了" : record.completed ? "完走" : "途中終了";
+    label.textContent = `${record.playerName || "未記名"} // ${playModeShortLabel(record.mode)} ${resultStatus} DAY ${record.day || 0} // ${new Date(record.recordedAt).toLocaleDateString("ja-JP")}`;
     main.append(score, label);
 
     const sub = document.createElement("div");
@@ -5889,36 +5984,42 @@ function requestNewGame() {
   requestSelectedModeGame();
 }
 
-function requestDay30Game() {
+function requestTimedModeGame(mode = startModeView) {
+  const config = playModeConfig(mode);
   openConfirmWidget({
-    kicker: "DAY30 CHALLENGE",
-    title: "DAY30モード",
-    copy: "現在のセーブデータを上書きして、DAY30終了時点の記録を残す競技モードを開始します。",
-    confirmText: "DAY30開始",
-    onConfirm: startDay30Game
+    kicker: config.startKicker,
+    title: config.startTitle,
+    copy: config.startCopy,
+    confirmText: config.startConfirm,
+    onConfirm: () => startNewGame(config.key)
   });
 }
 
+function requestDay30Game() {
+  requestTimedModeGame("day30");
+}
+
 function requestSelectedModeGame() {
+  const config = playModeConfig(startModeView);
   if (startModeView === "free") {
     openConfirmWidget({
-      kicker: "FREE OPERATION",
-      title: "フリーモード",
-      copy: "DAY30の期限なしで、現在のセーブデータを上書きしてゆったり遊ぶモードを開始します。",
-      confirmText: "フリー開始",
+      kicker: config.startKicker,
+      title: config.startTitle,
+      copy: config.startCopy,
+      confirmText: config.startConfirm,
       onConfirm: startFreeGame
     });
     return;
   }
-  requestDay30Game();
+  requestTimedModeGame(startModeView);
 }
-
 function playRecordsExportPayload() {
   return {
     app: "UNDERGREEN",
     exportedAt: new Date().toISOString(),
     records: {
       day30: readDay30Records(),
+      day60: readDay60Records(),
       free: readFreeRecords()
     }
   };
@@ -5991,6 +6092,7 @@ async function copyPlayRecordsToClipboard() {
 
 function clearPlayRecords() {
   saveDay30Records([]);
+  saveDay60Records([]);
   saveFreeRecords([]);
   renderDay30Records();
   toast("この端末のプレイレコードを消去しました。");
@@ -6001,7 +6103,7 @@ function requestClearPlayRecords() {
   openConfirmWidget({
     kicker: "DELETE RECORDS",
     title: "記録消去",
-    copy: "この端末に保存されているDAY30/フリーモードのプレイレコードをすべて消去します。",
+    copy: "この端末に保存されているDAY30/DAY60/フリーモードのプレイレコードをすべて消去します。",
     confirmText: "消去",
     onConfirm: clearPlayRecords
   });
@@ -6011,7 +6113,7 @@ function requestRecordExport() {
   openConfirmWidget({
     kicker: "RECORD EXPORT",
     title: "記録書き出し",
-    copy: "この端末に保存されているDAY30/フリーモードのプレイレコードをコピー、または消去できます。",
+    copy: "この端末に保存されているDAY30/DAY60/フリーモードのプレイレコードをコピー、または消去できます。",
     confirmText: "コピー",
     onConfirm: copyPlayRecordsToClipboard
   });
@@ -6052,19 +6154,20 @@ function enterDay30ViewMode() {
   document.getElementById("modal-backdrop").classList.add("hidden");
   document.getElementById("modal-close").hidden = false;
   document.getElementById("modal-reset").style.display = "";
-  setStatus("DAY30閲覧モード。時計は停止しています。");
+  setStatus(`${playModeLabel(state.mode)}閲覧モード。時計は停止しています。`);
   saveGame();
   render();
 }
 
 function requestExitToStart() {
-  if (state.mode === "day30" && !state.day30Recorded && !state.ended) {
+  if (isTimedPlayMode(state.mode) && !state.day30Recorded && !state.ended) {
+    const config = playModeConfig(state.mode);
     openConfirmWidget({
-      kicker: "DAY30 RETIRE",
+      kicker: `${config.shortLabel} RETIRE`,
       title: "途中終了しますか",
-      copy: "現在のDAYまでの内容で記録を保存し、結果画面へ進みます。",
+      copy: `現在のDAYまでの内容で${config.label}の記録を保存し、結果画面へ進みます。`,
       confirmText: "記録する",
-      onConfirm: () => finalizeDay30Run({ completed: false, playedDays: state.day })
+      onConfirm: () => finalizeDay30Run({ completed: false, playedDays: state.day, mode: state.mode })
     });
     return;
   }
@@ -6086,12 +6189,12 @@ function requestExitToStart() {
     onConfirm: openStartScreen
   });
 }
-
 function renderHeader() {
   document.getElementById("day-value").textContent = String(state.day).padStart(2, "0");
-  document.getElementById("day-limit").textContent = state.mode === "day30"
-    ? " / DAY30"
-    : state.mode === "free" ? " / FREE" : state.day > 30 ? " / inf" : " / 30";
+  const modeLimit = playModeLimit(state.mode);
+  document.getElementById("day-limit").textContent = state.mode === "free"
+    ? " / FREE"
+    : Number.isFinite(modeLimit) ? ` / ${playModeShortLabel(state.mode)}` : state.day > 30 ? " / inf" : " / 30";
   document.getElementById("money-value").textContent = formatNumber(state.money);
   document.getElementById("water-value").textContent = formatResource(Math.max(0, state.water));
   document.getElementById("nutrient-value").textContent = formatResource(Math.max(0, state.nutrient));
@@ -7394,7 +7497,7 @@ async function bootstrap() {
   setBootLoadingProgress(0, 1, "CSVデータを読み込んでいます...");
   await loadExternalData();
   await preloadBootAssets();
-  startModeView = safeStorageGet(START_MODE_PREF_KEY) === "free" ? "free" : "day30";
+  startModeView = validPlayMode(safeStorageGet(START_MODE_PREF_KEY), "day30");
   loadGame();
   bindEvents();
   render();
