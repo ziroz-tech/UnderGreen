@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 let CROPS = {};
 let MARKETS = {};
@@ -4447,6 +4447,46 @@ function harvestReadySlotElement(element) {
   return true;
 }
 
+function handleFacilityEquipmentTap(element, event) {
+  if (!element || !isOpaqueEquipmentPointer(element, event)) return false;
+  const unitButton = element.closest("[data-select-unit]");
+  if (unitButton) {
+    const unit = currentShelves().find((entry) => entry.id === unitButton.dataset.selectUnit);
+    if (unit?.slots.some((plant) => plant?.ready) && !GROW_UNIT_SLOT_LAYOUTS[unit.type]?.length) {
+      harvestReadyPlantsInUnit(unit.id, unitButton);
+      return true;
+    }
+    if (unit) {
+      setStatus(observationForUnit(unit));
+      return true;
+    }
+    return false;
+  }
+
+  const deviceButton = element.closest("[data-select-device]");
+  if (deviceButton) {
+    const device = currentFloorDevices().find((entry) => entry.id === deviceButton.dataset.selectDevice);
+    if (device?.type === "support_robot") {
+      showSupportRobotPanel(device);
+      if (!hasAnySupportOS()) triggerComms("support_robot_os_required");
+      return true;
+    }
+    if (device?.type === "procurement_terminal") {
+      showProcurementTerminal();
+      return true;
+    }
+    if (device?.type === "shipping_hatch") {
+      showShippingTerminal();
+      return true;
+    }
+    if (device) {
+      setStatus(`${FLOOR_DEVICES[device.type].name}が低く唸っています。周囲の空気だけが少し違う速度で動いています。`);
+      return true;
+    }
+  }
+  return false;
+}
+
 function handleSlotClick(shelfIndex, slotIndex) {
   const plant = currentShelves()[shelfIndex].slots[slotIndex];
   if (!plant) plantSeed(shelfIndex, slotIndex);
@@ -7172,8 +7212,14 @@ function bindEvents() {
     if (finishCleanToolDrag(event)) return;
     if (finishEquipmentMenu(event)) return;
     if (equipmentMenuTimer && event.pointerId === equipmentMenuTimer.pointerId) {
+      const pending = equipmentMenuTimer;
       cancelEquipmentMenuTimer();
       if (harvestHold && event.pointerId === harvestHold.pointerId) harvestHold = null;
+      if (handleFacilityEquipmentTap(pending.source, event)) {
+        suppressClickUntil = Date.now() + 220;
+        event.preventDefault();
+        return;
+      }
       suppressClickUntil = Date.now() + 180;
       return;
     }
