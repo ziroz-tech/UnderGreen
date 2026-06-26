@@ -6316,7 +6316,7 @@ function renderFarm() {
   }).join("");
   document.getElementById("base-banner").style.backgroundImage = `linear-gradient(90deg, rgba(3, 10, 8, .94), rgba(3, 10, 8, .28)), url("${base.image}")`;
   document.getElementById("base-banner").innerHTML = `
-    <div><p class="eyebrow">${base.code} // BASE ${ownedBases().findIndex((entry) => entry.id === base.id) + 1}/${ownedBases().length}</p><h3>${base.name}</h3><p>${base.description}</p>${tagMarkup(base.tags, BASE_TAGS)}</div>
+    <div><p class="eyebrow">${base.code} // BASE ${ownedBases().findIndex((entry) => entry.id === base.id) + 1}/${ownedBases().length}</p><h3>${base.name}</h3>${tagMarkup(base.tags, BASE_TAGS)}</div>
     <strong>${base.cols} x ${base.rows}<small>${base.cols * base.rows} GRID CELLS</small></strong>
     <div class="base-switcher">${baseTabs}</div>`;
 
@@ -6717,7 +6717,6 @@ function renderBroker() {
       <div class="property-copy">
         <p class="eyebrow">${property.code}</p>
         <h3>${property.name}</h3>
-        <p>${property.description}</p>
         ${tagMarkup(property.tags, BASE_TAGS)}
         <div class="property-preview" style="--preview-cols:${property.cols};--preview-rows:${property.rows}" aria-label="物件マス形状プレビュー">${preview}</div>
         <div class="property-tags">${visibleTraits.map((trait) => `<span>${trait}</span>`).join("")}</div>
