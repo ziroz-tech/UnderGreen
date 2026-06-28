@@ -230,7 +230,7 @@ h1 span {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 1px;
-  margin: 18px 0 12px;
+  margin: 12px 0 12px;
   padding: 1px;
   background: var(--line);
   border: 1px solid var(--line);
@@ -347,7 +347,7 @@ h1 span {
 
 .news-ticker strong {
   color: var(--yellow);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   letter-spacing: 0.12em;
   white-space: nowrap;
 }
@@ -627,7 +627,7 @@ h1 span {
 .environment-controls strong {
   min-width: 58px;
   color: var(--text);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   text-align: center;
 }
 
@@ -716,16 +716,22 @@ h1 span {
 
 .facility-grid-toolbar {
   position: relative;
-  z-index: 6;
+  z-index: 36;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 0;
   color: var(--green);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   letter-spacing: .08em;
+}
+
+.facility-toolbar-status {
+  min-height: 18px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .facility-grid-toolbar small {
@@ -736,11 +742,23 @@ h1 span {
 .facility-clean-tools {
   position: absolute;
   z-index: 34;
-  top: 58px;
+  top: 12px;
   right: 14px;
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(114, 255, 184, .28);
+  background: linear-gradient(180deg, rgba(4, 14, 11, .94), rgba(2, 8, 7, .86));
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .38), inset 0 0 16px rgba(114, 255, 184, .05);
   pointer-events: auto;
+}
+
+.tool-palette-label {
+  color: var(--muted);
+  font: 800 9px Consolas, monospace;
+  letter-spacing: .08em;
+  white-space: nowrap;
 }
 
 .clean-tool-button {
@@ -750,11 +768,12 @@ h1 span {
   width: 42px;
   height: 42px;
   min-width: 0;
-  padding: 0;
+  padding: 4px;
   border: 1px solid rgba(132, 151, 143, .42);
   border-radius: 6px;
   background: rgba(3, 10, 8, .84);
   box-shadow: 0 10px 22px rgba(0, 0, 0, .36);
+  color: var(--text);
   cursor: grab;
   touch-action: none;
 }
@@ -767,14 +786,15 @@ h1 span {
 
 .clean-tool-icon {
   display: block;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
   filter: drop-shadow(0 0 7px rgba(114, 255, 184, .28));
   pointer-events: none;
   user-select: none;
   -webkit-user-drag: none;
 }
+
 
 .clean-tool-ghost {
   position: fixed;
@@ -921,7 +941,7 @@ h1 span {
   width: var(--iso-width, 720px);
   height: var(--iso-height, 420px);
   min-width: min(100%, var(--iso-width, 720px));
-  margin: 68px auto 0;
+  margin: 62px auto 0;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -1683,7 +1703,7 @@ h1 span {
 
 .automation-row > strong {
   color: var(--yellow);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   letter-spacing: .08em;
 }
 
@@ -1815,7 +1835,7 @@ h1 span {
 
 .automation-selected-crop small {
   color: var(--yellow);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
 }
 
 .automation-selected-crop p {
@@ -2213,7 +2233,7 @@ h1 span {
 .panel-title span,
 .section-label span {
   color: var(--green);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   letter-spacing: 0.12em;
 }
 
@@ -2335,7 +2355,7 @@ h1 span {
 
 .system-readout strong {
   color: var(--text);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
 }
 
 .help-text {
@@ -2459,6 +2479,190 @@ h1 span {
 .shop-section {
   padding: 16px;
   margin-bottom: 16px;
+}
+
+.shop-category-carousel {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  min-height: 98px;
+  margin: 0 0 10px;
+  overflow: visible;
+}
+
+.shop-category-stage {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 92px;
+}
+
+.shop-category-cycle {
+  position: relative;
+  z-index: 8;
+  width: 30px;
+  height: 72px;
+  border: 1px solid rgba(113, 255, 184, .28);
+  color: rgba(113, 255, 184, .72);
+  background: rgba(4, 14, 10, .42);
+  font: 700 26px Consolas, monospace;
+  cursor: pointer;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease, color .18s ease;
+}
+
+.shop-category-cycle:hover {
+  color: var(--green-bright);
+  border-color: var(--green);
+  background: rgba(39, 95, 70, .3);
+  transform: scale(1.05);
+}
+
+.shop-category-card {
+  position: relative;
+  min-width: 0;
+  min-height: 88px;
+  padding: 12px 12px 11px;
+  border: 1px solid rgba(114, 255, 184, .22);
+  background: rgba(4, 12, 9, .86);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  opacity: .42;
+  pointer-events: auto;
+  filter: grayscale(.4) saturate(.72) brightness(.66);
+  transition: transform .26s cubic-bezier(.18, .86, .24, 1.08), opacity .22s ease, filter .22s ease, border-color .22s ease, background .22s ease;
+}
+
+.shop-category-card.center {
+  z-index: 2;
+  opacity: 1;
+  transform: translateY(-2px) scale(1.02);
+  color: var(--text);
+  border-color: var(--green);
+  background: linear-gradient(135deg, rgba(42, 101, 73, .32), rgba(4, 12, 9, .94));
+  filter: saturate(1.05) brightness(1);
+  box-shadow: 0 0 18px rgba(114, 255, 184, .11);
+}
+
+.shop-category-card.left,
+.shop-category-card.right,
+.shop-category-card.far-left,
+.shop-category-card.far-right {
+  opacity: .42;
+  transform: none;
+}
+
+.shop-category-card:hover {
+  border-color: var(--green-bright);
+  color: var(--text);
+  opacity: .72;
+  filter: grayscale(.18) saturate(.9) brightness(.86);
+}
+
+.shop-category-card.center:hover {
+  opacity: 1;
+  filter: saturate(1.05) brightness(1);
+}
+
+.shop-category-kicker,
+.shop-category-card strong,
+.shop-category-card small,
+.shop-category-card b {
+  display: block;
+}
+
+.shop-category-kicker {
+  margin-bottom: 6px;
+  color: var(--green);
+  font: 800 8px Consolas, monospace;
+  letter-spacing: .12em;
+}
+
+.shop-category-card strong {
+  font-weight: 900;
+  font-size: 15px;
+}
+
+.shop-category-card small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.shop-category-card b {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  color: var(--yellow);
+  font: 800 10px Consolas, monospace;
+}
+
+.shop-category-carousel.slide-next .shop-category-card.center,
+.shop-category-carousel.slide-prev .shop-category-card.center {
+  animation: shopCategoryCenterSettle .28s cubic-bezier(.18, .86, .24, 1.08);
+}
+
+.shop-category-carousel.slide-next .cycle-next,
+.shop-category-carousel.slide-prev .cycle-prev {
+  animation: shopCategoryArrowPulse .28s ease;
+}
+
+@keyframes shopCategoryCenterSettle {
+  0% { transform: translateY(-2px) scale(.96); filter: brightness(1.25) saturate(1.25); }
+  62% { transform: translateY(-3px) scale(1.045); }
+  100% { transform: translateY(-2px) scale(1.02); }
+}
+
+@keyframes shopCategoryArrowPulse {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.16); color: var(--green-bright); }
+  100% { transform: scale(1); }
+}
+
+.shop-category-panel {
+  min-height: 0;
+}
+
+#shop-screen .contact-panel {
+  grid-template-columns: 82px 1fr auto;
+  gap: 14px;
+  margin-bottom: 10px;
+  padding: 10px;
+}
+
+#shop-screen .contact-panel > img {
+  width: 82px;
+  height: 62px;
+}
+
+#shop-screen .contact-panel p:last-child {
+  line-height: 1.45;
+}
+
+#shop-screen .shop-grid {
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#shop-screen .shop-card {
+  min-height: 132px;
+  padding: 10px;
+}
+
+#shop-screen .shop-card p {
+  max-height: 42px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  line-height: 1.38;
+}
+
+#shop-screen .shop-glyph {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 7px;
 }
 
 .price-grid {
@@ -3482,7 +3686,7 @@ h1 span {
   padding: 10px 12px;
   border-block: 1px solid rgba(113, 255, 184, 0.18);
   color: var(--muted);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   letter-spacing: 0.08em;
 }
 
@@ -3520,7 +3724,7 @@ h1 span {
 
 .start-records-head span {
   color: var(--muted);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
 }
 
 .day30-record-list {
@@ -3561,7 +3765,7 @@ h1 span {
 .day30-record-main span,
 .day30-record-sub span {
   color: var(--muted);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
 }
 
 .day30-record-title {
@@ -3707,7 +3911,7 @@ h1 span {
   align-items: center;
   gap: 8px;
   color: rgba(245, 214, 91, 0.82);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
 }
 
 .news-history-kind {
@@ -4168,6 +4372,14 @@ h1 span {
     text-align: center;
   }
 
+  .shop-category-stage {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .shop-category-carousel {
+    min-height: 188px;
+  }
+
   .shop-grid,
   .price-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -4404,13 +4616,25 @@ h1 span {
   }
 
   #farm-screen .facility-clean-tools {
-    top: 46px;
+    top: 10px;
     right: 10px;
+    gap: 5px;
+    padding: 5px;
+  }
+
+  #farm-screen .tool-palette-label {
+    display: inline-block;
+    font-size: 8px;
   }
 
   #farm-screen .clean-tool-button {
-    width: 36px;
-    height: 36px;
+    width: 38px;
+    height: 38px;
+  }
+
+  #farm-screen .clean-tool-icon {
+    width: 24px;
+    height: 24px;
   }
 
   #farm-screen .side-panel {
@@ -4667,6 +4891,30 @@ h1 span {
     grid-column: 1 / -1;
   }
 
+  .shop-category-carousel {
+    grid-template-columns: 28px minmax(0, 1fr) 28px;
+    min-height: 186px;
+  }
+
+  .shop-category-stage {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .shop-category-cycle {
+    width: 26px;
+    height: 68px;
+    font-size: 22px;
+  }
+
+  .shop-category-card {
+    min-height: 82px;
+    padding: 10px 10px;
+  }
+
+  .shop-category-card strong {
+    font-size: 14px;
+  }
   .shop-grid,
   .equipment-grid,
   .price-grid {
@@ -5169,7 +5417,7 @@ h1 span {
   border-color: rgba(245, 214, 91, 0.34);
   color: var(--yellow);
   background: rgba(245, 214, 91, 0.06);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   letter-spacing: .08em;
 }
 
@@ -5220,7 +5468,7 @@ h1 span {
   justify-content: space-between;
   gap: 12px;
   color: var(--muted);
-  font: 700 10px Consolas, monospace;
+  font: 800 9px Consolas, monospace;
   letter-spacing: .12em;
 }
 

@@ -96,6 +96,36 @@ const PLAY_MODES = {
 const START_MODE_SEQUENCE = ["day30", "day60", "free"];
 const PROPERTY_REROLL_FEE = 100;
 const PROCUREMENT_REROLL_FEE = 80;
+const SHOP_CATEGORIES = {
+  seeds: {
+    label: "種子",
+    title: "SEED CATALOG",
+    subtitle: "植える作物を選ぶ",
+    kind: "seeds"
+  },
+  supplies: {
+    label: "補給・保管",
+    title: "SUPPLIES / STORAGE",
+    subtitle: "水・養液・保管補助",
+    kind: "equipment",
+    items: ["water", "nutrient", "tank", "filter", "fridge"]
+  },
+  grow: {
+    label: "栽培設備",
+    title: "GROW HARDWARE",
+    subtitle: "ポッド・ボックス・環境補助",
+    kind: "equipment",
+    items: ["pod", "box", "light", "fan"],
+    showRefresh: true
+  },
+  automation: {
+    label: "自動化",
+    title: "AUTOMATION",
+    subtitle: "ロボット・端末・追加OS",
+    kind: "equipment",
+    items: ["support_robot", "procurement_terminal", "shipping_hatch", "support_os_harvest", "support_os_planting", "support_os_cleaning"]
+  }
+};
 const PROPERTY_LISTING_COUNT = 4;
 const SAFE_ROOM_IMAGE = "assets/bases/safe-room.png";
 const DEFAULT_ENVIRONMENT = { temp: 24, humidity: 60, co2: 700 };
@@ -114,6 +144,7 @@ const spriteAlphaCache = new Map();
 let state;
 let selectedSeed = "lettuce";
 let selectedMarket = "lower";
+let selectedShopCategory = "seeds";
 let saleQuantities = {};
 let selectedUnitId = null;
 let selectedDeviceId = null;
@@ -1002,6 +1033,7 @@ function createInitialState(mode = "normal") {
   return {
     day: 1,
     mode,
+    debugMode: false,
     money: 300,
     water: 20,
     nutrient: 20,
@@ -1666,6 +1698,7 @@ function loadGame() {
   state.commsOpen ||= [];
   state.unlocks ||= {};
   state.mode ||= "normal";
+  state.debugMode = Boolean(state.debugMode);
   state.day30Recorded = Boolean(state.day30Recorded);
   state.day30RecordId ||= null;
   state.supportRobotGranted = Boolean(state.supportRobotGranted);
@@ -5398,14 +5431,15 @@ function processDayBoundary() {
 
   state.day += 1;
   const modeLimit = playModeLimit(state.mode);
-  if (Number.isFinite(modeLimit) && state.day > modeLimit) {
+  const debugMode = Boolean(state.debugMode);
+  if (!debugMode && Number.isFinite(modeLimit) && state.day > modeLimit) {
     finalizeDay30Run({ completed: true, playedDays: modeLimit, mode: state.mode });
     return;
   }
   if (shouldRefreshMonthlyScheduleForDay(state.day)) {
     state.monthlySchedule = generateMonthlySchedule();
   }
-  const operationFailed = state.money <= -500 || state.consecutiveDebtDays >= 3;
+  const operationFailed = !debugMode && (state.money <= -500 || state.consecutiveDebtDays >= 3);
   if (operationFailed && isTimedPlayMode(state.mode)) {
     finalizeDay30Run({ completed: false, playedDays: state.day, mode: state.mode });
     return;
@@ -5682,6 +5716,7 @@ function clearSessionInteractionState() {
   clearCleanToolDrag();
   selectedSeed = "lettuce";
   selectedMarket = "lower";
+  selectedShopCategory = "seeds";
   saleQuantities = {};
   selectedUnitId = null;
   selectedDeviceId = null;
@@ -5720,6 +5755,12 @@ function handleStartPrimary() {
 }
 
 function unlockDebugState() {
+  state.mode = "free";
+  state.debugMode = true;
+  state.ended = false;
+  state.resultShown = false;
+  state.paused = false;
+  state.consecutiveDebtDays = 0;
   state.money = 99999;
   state.water = Math.max(Number(state.water) || 0, 999);
   state.nutrientCapacity = Math.max(Number(state.nutrientCapacity) || 0, 999);
@@ -6320,19 +6361,10 @@ function renderFarm() {
     <strong>${base.cols} x ${base.rows}<small>${base.cols * base.rows} GRID CELLS</small></strong>
     <div class="base-switcher">${baseTabs}</div>`;
 
-  const env = base.environment || DEFAULT_ENVIRONMENT;
   const dirtyCount = [...shelves, ...floorDevices].filter(needsCleaning).length;
   document.getElementById("facility-grid-toolbar").innerHTML = placementItem
-    ? `<span class="placement-active">PLACING // ${placementItem.kind === "unit" ? GROW_UNITS[placementItem.type].name : FLOOR_DEVICES[placementItem.type].name}</span><div class="placement-tools"><small>Drop on an open isometric cell</small><button type="button" data-cancel-placement>CANCEL</button></div>`
-    : `<span>ISOMETRIC FACILITY LAYOUT ${dirtyCount ? `<b class="clean-alert">CLEAN ${dirtyCount}</b>` : ""}</span>
-      <div class="environment-controls">
-        <button data-env="temp" data-env-delta="-1">-</button><strong>${env.temp}C</strong><button data-env="temp" data-env-delta="1">+</button>
-        <button data-env="humidity" data-env-delta="-5">-</button><strong>${env.humidity}%RH</strong><button data-env="humidity" data-env-delta="5">+</button>
-        <button data-env="co2" data-env-delta="-50">-</button><strong>${env.co2}ppm</strong><button data-env="co2" data-env-delta="50">+</button>
-        <button data-view-zoom="-1">ZOOM-</button><strong>${Math.round(facilityView.zoom * 100)}%</strong><button data-view-zoom="1">ZOOM+</button>
-        <button data-view-reset>RESET</button>
-      </div>
-      <small>GRID READY</small>`;
+    ? `<span class="placement-active">配置中 // ${placementItem.kind === "unit" ? GROW_UNITS[placementItem.type].name : FLOOR_DEVICES[placementItem.type].name}</span><div class="placement-tools"><small>空いているマスに置いてください</small><button type="button" data-cancel-placement>キャンセル</button></div>`
+    : `<span class="facility-toolbar-status">${dirtyCount ? `<b class="clean-alert">清掃 ${dirtyCount}</b>` : ""}</span>`;
 
   const coverageDevices = floorDevices.filter((device) => {
     const definition = FLOOR_DEVICES[device.type];
@@ -6449,7 +6481,7 @@ const unplaced = sharedStockItems();
   ).map(([cropId, crop]) => `
     <button class="seed-option ${selectedSeed === cropId ? "active" : ""}" data-seed="${cropId}" data-drag-crop="${cropId}" ${state.seeds[cropId] <= 0 ? "disabled" : ""} style="--crop-color:${crop.color}">
       <span class="seed-glyph"><img src="${crop.icon}" alt=""></span>
-      <span><strong>${crop.name}</strong><small>${crop.days} DAYS / 適温 ${CROP_ENVIRONMENT[cropId]?.temp || DEFAULT_ENVIRONMENT.temp}C</small></span>
+      <span><strong>${crop.name}</strong><small>成長 ${crop.days}日</small></span>
       <b>x${state.seeds[cropId]}</b>
     </button>
   `).join("");
@@ -6459,10 +6491,14 @@ const unplaced = sharedStockItems();
   const ready = visiblePlants.filter(({ plant }) => plant.ready).length;
   const dead = visiblePlants.filter(({ plant }) => plant.dead).length;
   const growing = visiblePlants.length - ready - dead;
-  document.getElementById("water-demand").textContent = `${formatResource(demand.water)} / DAY`;
-  document.getElementById("nutrient-demand").textContent = `${formatResource(demand.nutrient)} / DAY`;
-  document.getElementById("unit-count").textContent = `${shelves.length} / ${allShelves().length} UNIT`;
-  document.getElementById("continuous-count").textContent = `${allShelves().filter((unit) => GROW_UNITS[unit.type]?.continuous).length} UNIT`;
+  const waterDemandEl = document.getElementById("water-demand");
+  if (waterDemandEl) waterDemandEl.textContent = `${formatResource(demand.water)} / DAY`;
+  const nutrientDemandEl = document.getElementById("nutrient-demand");
+  if (nutrientDemandEl) nutrientDemandEl.textContent = `${formatResource(demand.nutrient)} / DAY`;
+  const unitCountEl = document.getElementById("unit-count");
+  if (unitCountEl) unitCountEl.textContent = `${shelves.length} / ${allShelves().length} UNIT`;
+  const continuousCountEl = document.getElementById("continuous-count");
+  if (continuousCountEl) continuousCountEl.textContent = `${allShelves().filter((unit) => GROW_UNITS[unit.type]?.continuous).length} UNIT`;
   document.getElementById("farm-summary").innerHTML = `<span>生育中</span><strong>${growing}</strong><span>収穫可能</span><strong>${ready}</strong>${dead ? `<span>枯死</span><strong class="danger-text">${dead}</strong>` : ""}`;
 }
 
@@ -6634,11 +6670,58 @@ function renderInventory() {
   }).join("");
 }
 
-function renderShop() {
-  ensureProcurementTags();
-  document.getElementById("seed-shop").innerHTML = Object.entries(CROPS).map(([cropId, crop]) => {
-    const available = isUnlocked("seed_item", cropId);
-    return `
+function shopCategoryCount(category) {
+  if (category.kind === "seeds") {
+    const total = Object.keys(CROPS).length;
+    const available = Object.keys(CROPS).filter((cropId) => isUnlocked("seed_item", cropId)).length;
+    return `${available}/${total}`;
+  }
+  const ids = (category.items || []).filter((itemId) => EQUIPMENT[itemId]);
+  const available = ids.filter((itemId) => isUnlocked("shop_item", itemId)).length;
+  return `${available}/${ids.length}`;
+}
+
+function shopCategoryIds() {
+  return Object.keys(SHOP_CATEGORIES);
+}
+
+function shopCategoryCycleDirection(targetCategoryId) {
+  const ids = shopCategoryIds();
+  const currentIndex = Math.max(0, ids.indexOf(selectedShopCategory));
+  const targetIndex = ids.indexOf(targetCategoryId);
+  if (targetIndex < 0 || targetIndex === currentIndex) return "";
+  const forward = (targetIndex - currentIndex + ids.length) % ids.length;
+  const backward = (currentIndex - targetIndex + ids.length) % ids.length;
+  return forward <= backward ? "next" : "prev";
+}
+
+function cycleShopCategory(direction = 1) {
+  const ids = shopCategoryIds();
+  if (!ids.length) return;
+  const currentIndex = Math.max(0, ids.indexOf(selectedShopCategory));
+  selectedShopCategory = ids[(currentIndex + direction + ids.length) % ids.length];
+  playSound("tab_switch", 0.12);
+  hapticFeedback(6);
+  renderShop(direction > 0 ? "next" : "prev");
+}
+
+function shopCategoryCarouselPosition(categoryId) {
+  const ids = shopCategoryIds();
+  const selectedIndex = Math.max(0, ids.indexOf(selectedShopCategory));
+  const index = ids.indexOf(categoryId);
+  const count = ids.length;
+  let offset = index - selectedIndex;
+  if (offset > count / 2) offset -= count;
+  if (offset < -count / 2) offset += count;
+  if (offset === 0) return "center";
+  if (offset === -1 || offset === count - 1) return "left";
+  if (offset === 1 || offset === 1 - count) return "right";
+  return offset < 0 ? "far-left" : "far-right";
+}
+
+function renderSeedShopCard(cropId, crop) {
+  const available = isUnlocked("seed_item", cropId);
+  return `
     <article class="shop-card ${available ? "" : "locked"}" style="--item-color:${crop.color}">
       <div class="shop-glyph"><img src="${crop.icon}" alt=""></div>
       <h3>${crop.name} 種子 x${crop.packSize}</h3>
@@ -6647,29 +6730,29 @@ function renderShop() {
         <span class="shop-price">₡${crop.seedPrice}</span>
         <button class="buy-button" data-buy-seed="${cropId}" ${!available || state.money < crop.seedPrice ? "disabled" : ""}>${available ? `購入 +${crop.packSize}` : "LOCKED"}</button>
       </footer>
-    </article>
-  `;}).join("");
+    </article>`;
+}
 
-  const hardwareCards = Object.entries(EQUIPMENT).map(([itemId, item]) => {
-    const available = isUnlocked("shop_item", itemId);
-    const owned = (itemId === "filter" && state.equipment.filter)
-      || (itemId === "fridge" && state.equipment.fridge)
-      || (itemId === "support_os_harvest" && state.supportOS?.harvest)
-      || (itemId === "support_os_planting" && state.supportOS?.planting)
-      || (itemId === "support_os_cleaning" && state.supportOS?.cleaning);
-    const nutrientFull = itemId === "nutrient" && state.nutrient >= state.nutrientCapacity;
-    let price = item.basePrice;
-    if (itemId === "water") price = waterPackPrice();
-    if (GROW_UNITS[itemId]) price = growUnitPrice(itemId);
-    const tags = (GROW_UNITS[itemId] || FLOOR_DEVICES[itemId]) ? unitTags(itemId) : [];
-    const tagEffects = combinedEffects(tags, EQUIPMENT_TAGS);
-    if (tags.length) price = Math.max(1, Math.round(price * (tagEffects.priceMod || 1)));
-    const disabled = !available || owned || nutrientFull || state.money < price;
-    let count = "";
-    if (itemId === "tank") count = ` x${state.equipment.tanks}`;
-    if (GROW_UNITS[itemId]) count = ` x${unitCount(itemId)}`;
-    if (FLOOR_DEVICES[itemId]) count = ` x${allFloorDevices().filter((device) => device.type === itemId).length}`;
-    return `<article class="shop-card ${available ? "" : "locked"} ${owned ? "owned" : ""}" style="--item-color:${item.color}">
+function renderEquipmentShopCard(itemId, item) {
+  const available = isUnlocked("shop_item", itemId);
+  const owned = (itemId === "filter" && state.equipment.filter)
+    || (itemId === "fridge" && state.equipment.fridge)
+    || (itemId === "support_os_harvest" && state.supportOS?.harvest)
+    || (itemId === "support_os_planting" && state.supportOS?.planting)
+    || (itemId === "support_os_cleaning" && state.supportOS?.cleaning);
+  const nutrientFull = itemId === "nutrient" && state.nutrient >= state.nutrientCapacity;
+  let price = item.basePrice;
+  if (itemId === "water") price = waterPackPrice();
+  if (GROW_UNITS[itemId]) price = growUnitPrice(itemId);
+  const tags = (GROW_UNITS[itemId] || FLOOR_DEVICES[itemId]) ? unitTags(itemId) : [];
+  const tagEffects = combinedEffects(tags, EQUIPMENT_TAGS);
+  if (tags.length) price = Math.max(1, Math.round(price * (tagEffects.priceMod || 1)));
+  const disabled = !available || owned || nutrientFull || state.money < price;
+  let count = "";
+  if (itemId === "tank") count = ` x${state.equipment.tanks}`;
+  if (GROW_UNITS[itemId]) count = ` x${unitCount(itemId)}`;
+  if (FLOOR_DEVICES[itemId]) count = ` x${allFloorDevices().filter((device) => device.type === itemId).length}`;
+  return `<article class="shop-card ${available ? "" : "locked"} ${owned ? "owned" : ""}" style="--item-color:${item.color}">
       ${owned ? `<span class="owned-tag">INSTALLED</span>` : ""}
       <div class="shop-glyph"><img src="${item.sprite || item.icon}" alt=""></div>
       <h3>${item.name}${count}</h3>
@@ -6680,9 +6763,10 @@ function renderShop() {
         <button class="buy-button" data-buy-item="${itemId}" ${disabled ? "disabled" : ""}>${!available ? "LOCKED" : owned ? "OWNED" : "BUY"}</button>
       </footer>
     </article>`;
-  }).join("");
-  document.getElementById("equipment-shop").innerHTML = `
-    <article class="shop-card lineup-card">
+}
+
+function renderProcurementRefreshCard() {
+  return `<article class="shop-card lineup-card">
       <div class="shop-glyph"><img src="${text("procurement_refresh_icon", "assets/icons/seed.webp")}" alt=""></div>
       <h3>${text("procurement_refresh_title", "タグ付き在庫更新")}</h3>
       <p>${text("procurement_refresh_copy", "Mara searches alternate equipment routes. Performance tags change after each refresh.")}</p>
@@ -6690,7 +6774,52 @@ function renderShop() {
         <span class="shop-price">₡${PROCUREMENT_REROLL_FEE}</span>
         <button class="buy-button" data-refresh-procurement ${state.money < PROCUREMENT_REROLL_FEE ? "disabled" : ""}>${text("procurement_refresh_button", "更新")}</button>
       </footer>
-    </article>${hardwareCards}`;
+    </article>`;
+}
+
+function renderShop(direction = "") {
+  ensureProcurementTags();
+  if (!SHOP_CATEGORIES[selectedShopCategory]) selectedShopCategory = "seeds";
+  const category = SHOP_CATEGORIES[selectedShopCategory];
+  const tabs = document.getElementById("shop-category-tabs");
+  if (tabs) {
+    const categories = shopCategoryIds();
+    tabs.className = ("shop-category-carousel " + (direction ? "slide-" + direction : "")).trim();
+    if (direction) window.setTimeout(() => tabs.classList.remove("slide-" + direction), 360);
+    tabs.innerHTML = `
+      <button class="shop-category-cycle cycle-prev" data-shop-category-cycle="-1" aria-label="Previous procurement category">&lsaquo;</button>
+      <div class="shop-category-stage">
+        ${categories.map((categoryId, index) => {
+          const entry = SHOP_CATEGORIES[categoryId];
+          const position = shopCategoryCarouselPosition(categoryId);
+          return `<button class="shop-category-card ${position} ${selectedShopCategory === categoryId ? "active" : ""}" data-shop-category="${categoryId}" type="button">
+            <span class="shop-category-kicker">PROCUREMENT // ${String(index + 1).padStart(2, "0")}</span>
+            <strong>${entry.label}</strong>
+            <small>${entry.subtitle}</small>
+            <b>${shopCategoryCount(entry)}</b>
+          </button>`;
+        }).join("")}
+      </div>
+      <button class="shop-category-cycle cycle-next" data-shop-category-cycle="1" aria-label="Next procurement category">&rsaquo;</button>
+    `;
+  }
+  const label = document.getElementById("shop-category-label");
+  if (label) label.innerHTML = `<span>${category.title}</span><small>${category.subtitle}</small>`;
+
+  const grid = document.getElementById("procurement-shop");
+  if (!grid) return;
+  if (category.kind === "seeds") {
+    grid.className = "shop-grid procurement-grid seed-procurement-grid";
+    grid.innerHTML = Object.entries(CROPS).map(([cropId, crop]) => renderSeedShopCard(cropId, crop)).join("");
+    return;
+  }
+
+  grid.className = "shop-grid procurement-grid equipment-grid";
+  const itemCards = (category.items || [])
+    .filter((itemId) => EQUIPMENT[itemId])
+    .map((itemId) => renderEquipmentShopCard(itemId, EQUIPMENT[itemId]));
+  grid.innerHTML = `${category.showRefresh ? renderProcurementRefreshCard() : ""}${itemCards.join("")}`
+    || `<div class="inventory-empty">このカテゴリの取引はありません</div>`;
 }
 
 function renderBroker() {
@@ -7067,6 +7196,24 @@ function bindEvents() {
       renderMarkets();
     }
 
+    const shopCategoryCycle = event.target.closest("[data-shop-category-cycle]");
+    if (shopCategoryCycle) {
+      cycleShopCategory(Number(shopCategoryCycle.dataset.shopCategoryCycle) || 1);
+      return;
+    }
+
+    const shopCategoryButton = event.target.closest("[data-shop-category]");
+    if (shopCategoryButton) {
+      const categoryId = shopCategoryButton.dataset.shopCategory;
+      if (SHOP_CATEGORIES[categoryId] && selectedShopCategory !== categoryId) {
+        const direction = shopCategoryCycleDirection(categoryId);
+        selectedShopCategory = categoryId;
+        playSound("tab_switch", 0.12);
+        hapticFeedback(6);
+        renderShop(direction);
+      }
+      return;
+    }
     const buySeedButton = event.target.closest("[data-buy-seed]");
     if (buySeedButton) buySeed(buySeedButton.dataset.buySeed);
 

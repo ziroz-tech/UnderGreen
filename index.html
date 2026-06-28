@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=120">
+    <link rel="stylesheet" href="styles.css?v=125">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -34,6 +34,15 @@
       <button class="icon-button" id="reset-button" title="終了" aria-label="終了">⏻</button>
     </header>
 
+    <section class="news-ticker">
+      <span class="live-dot"></span>
+      <strong>LOWNET NEWS</strong>
+      <div class="ticker-divider"></div>
+      <p id="news-text">通信傍受中... 市場データを復号しています。</p>
+      <span class="news-effect" id="news-effect">NO SIGNAL</span>
+      <button class="news-history-button" id="news-history-button" type="button">履歴</button>
+    </section>
+
     <section class="resource-strip" aria-label="保有資源">
       <div class="resource-card credit">
         <img class="resource-image" src="assets/icons/credit.webp" alt="">
@@ -57,15 +66,6 @@
       </div>
     </section>
 
-    <section class="news-ticker">
-      <span class="live-dot"></span>
-      <strong>LOWNET NEWS</strong>
-      <div class="ticker-divider"></div>
-      <p id="news-text">通信傍受中... 市場データを復号しています。</p>
-      <span class="news-effect" id="news-effect">NO SIGNAL</span>
-      <button class="news-history-button" id="news-history-button" type="button">履歴</button>
-    </section>
-
     <nav class="tabs" aria-label="ゲーム画面">
       <button class="tab active" data-tab="farm"><span>01</span>栽培区画</button>
       <button class="tab" data-tab="market"><span>02</span>闇市場</button>
@@ -79,7 +79,6 @@
       <section class="screen active" id="farm-screen">
         <div class="screen-heading">
           <div>
-            <p class="eyebrow">GROW MODULES</p>
             <h2>栽培区画</h2>
           </div>
           <div class="heading-stats" id="farm-summary"></div>
@@ -89,11 +88,12 @@
             <article class="base-banner" id="base-banner"></article>
             <div class="facility-grid-shell">
               <div class="facility-grid-toolbar" id="facility-grid-toolbar"></div>
-              <div class="facility-clean-tools" aria-label="Cleaning tools">
-                <button class="clean-tool-button tool-brush" data-clean-tool="brush" type="button" aria-label="Brush">
+              <div class="facility-clean-tools" aria-label="清掃ツール">
+                <span class="tool-palette-label">TOOLBOX</span>
+                <button class="clean-tool-button tool-brush" data-clean-tool="brush" type="button" aria-label="ブラシ">
                   <img class="clean-tool-icon" src="assets/icons/clean-brush.webp?v=2" alt="" draggable="false">
                 </button>
-                <button class="clean-tool-button tool-bucket" data-clean-tool="bucket" type="button" aria-label="Bucket">
+                <button class="clean-tool-button tool-bucket" data-clean-tool="bucket" type="button" aria-label="バケツ">
                   <img class="clean-tool-icon" src="assets/icons/clean-bucket.webp?v=2" alt="" draggable="false">
                 </button>
               </div>
@@ -112,12 +112,6 @@
               <small>植える種を選択</small>
             </div>
             <div id="seed-selector" class="seed-selector"></div>
-            <div class="system-readout">
-              <div><span>給水予測</span><strong id="water-demand">0 / DAY</strong></div>
-              <div><span>養液予測</span><strong id="nutrient-demand">0 / DAY</strong></div>
-              <div><span>栽培設備</span><strong id="unit-count">0 UNIT</strong></div>
-              <div><span>連続消費設備</span><strong id="continuous-count">0 UNIT</strong></div>
-            </div>
             <p class="help-text">種を空きスロットへ、設備をグリッドへドラッグして操作できます。クリック操作も併用できます。</p>
           </aside>
         </div>
@@ -181,13 +175,10 @@
           </div>
           <span>TRUSTED CONTACT</span>
         </div>
-        <div class="shop-section">
-          <div class="section-label"><span>SEED CATALOG</span><small>違法種子アーカイブ</small></div>
-          <div class="shop-grid" id="seed-shop"></div>
-        </div>
-        <div class="shop-section">
-          <div class="section-label"><span>SUPPLIES & HARDWARE</span><small>資源・設備</small></div>
-          <div class="shop-grid equipment-grid" id="equipment-shop"></div>
+        <div class="shop-category-carousel" id="shop-category-tabs" aria-label="調達カテゴリ"></div>
+        <div class="shop-section shop-category-panel">
+          <div class="section-label" id="shop-category-label"></div>
+          <div class="shop-grid procurement-grid" id="procurement-shop"></div>
         </div>
       </section>
 
@@ -340,6 +331,6 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=151"></script>
+  <script src="game.js?v=155"></script>
 </body>
 </html>
