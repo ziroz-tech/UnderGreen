@@ -115,8 +115,7 @@ const SHOP_CATEGORIES = {
     title: "GROW HARDWARE",
     subtitle: "ポッド・ボックス・環境補助",
     kind: "equipment",
-    items: ["pod", "box", "light", "fan"],
-    showRefresh: true
+    items: ["pod", "box", "light", "fan"]
   },
   automation: {
     label: "自動化",
@@ -931,7 +930,7 @@ function trackSaleAnalytics(batch, marketId, qty, unitPrice, revenue, premiumSal
   entry.qty += amount;
   entry.revenue += Math.round(Number(revenue) || 0);
   analytics.sales.byCropMarket[key] = entry;
-  const acceptedMarkets = Object.keys(MARKETS).filter((candidate) => isMarketAvailable(candidate) && MARKETS[candidate]?.accepts?.includes(batch.crop));
+  const acceptedMarkets = Object.keys(MARKETS).filter((candidate) => canSellCropToMarket(batch.crop, candidate));
   const best = acceptedMarkets
     .map((candidate) => ({ marketId: candidate, price: getUnitPrice(batch, candidate) }))
     .sort((a, b) => b.price - a.price)[0];
@@ -1420,6 +1419,14 @@ function updateMarketForDay() {
 
 function isMarketAvailable(marketId) {
   return Boolean(MARKETS[marketId] && state.marketUnlocked[marketId]);
+}
+
+function canMarketAcceptCrop(cropId, marketId) {
+  return Boolean(CROPS[cropId] && MARKETS[marketId]?.accepts?.includes(cropId));
+}
+
+function canSellCropToMarket(cropId, marketId) {
+  return isMarketAvailable(marketId) && canMarketAcceptCrop(cropId, marketId);
 }
 
 function progressionValue(key) {
@@ -2030,10 +2037,18 @@ function itemGridCenter(item, kind) {
   return { x: item.x + (size.width - 1) / 2, y: item.y + (size.height - 1) / 2 };
 }
 
+function gridRangeDistance(aX, aY, bX, bY) {
+  return Math.abs(Number(aX) - Number(bX)) + Math.abs(Number(aY) - Number(bY));
+}
+
+function isWithinGridRange(aX, aY, bX, bY, radius) {
+  return gridRangeDistance(aX, aY, bX, bY) <= Number(radius || 0);
+}
+
 function supportRobotCanReach(robot, item, kind) {
   if (!robot?.placed || !item?.placed) return false;
   const center = itemGridCenter(item, kind);
-  return Math.max(Math.abs(center.x - robot.x), Math.abs(center.y - robot.y)) <= supportRobotRange(robot);
+  return isWithinGridRange(center.x, center.y, robot.x, robot.y, supportRobotRange(robot));
 }
 
 function refreshSupportRobotCooldown(robot) {
@@ -2209,7 +2224,8 @@ function getUnitEffects(unit) {
   const affected = (type) => base.floorDevices.some((device) => {
     if (!device.placed || device.type !== type) return false;
     const radius = FLOOR_DEVICES[type].radius;
-    return Math.max(Math.abs(centerX - device.x), Math.abs(centerY - device.y)) <= radius;
+    const deviceCenter = itemGridCenter(device, "device");
+    return isWithinGridRange(centerX, centerY, deviceCenter.x, deviceCenter.y, radius);
   });
   return { light: affected("light"), fan: affected("fan") };
 }
@@ -2281,6 +2297,7 @@ function cropPrimaryMarket(cropId) {
 }
 
 function isMarketSpecialty(cropId, marketId) {
+  if (cropId === "tomato" && (marketId === "lower" || marketId === "upper")) return true;
   return cropPrimaryMarket(cropId) === marketId;
 }
 
@@ -2605,7 +2622,7 @@ function bestAvailableQuote(cropOrBatch) {
     : cropOrBatch;
   if (!batch?.crop) return 1;
   const prices = Object.keys(MARKETS)
-    .filter((marketId) => isMarketAvailable(marketId) && MARKETS[marketId]?.accepts?.includes(batch.crop))
+    .filter((marketId) => canSellCropToMarket(batch.crop, marketId))
     .map((marketId) => getUnitPrice(batch, marketId));
   return Math.max(1, ...prices);
 }
@@ -3714,6 +3731,29 @@ function canSellEquipment(kind, item) {
   if (kind === "device" && item.type === "support_robot") return false;
   return kind !== "unit" || !item.slots.some(Boolean);
 }
+function canOpenAutomationPanel(kind, item) {
+  return kind === "device" && ["support_robot", "procurement_terminal", "shipping_hatch"].includes(item.type);
+}
+
+function openAutomationPanelForEquipment(kind, id) {
+  const record = findOwnedEquipment(kind, id);
+  const item = record?.item;
+  if (!item || !canOpenAutomationPanel(kind, item)) return false;
+  if (item.type === "support_robot") {
+    showSupportRobotPanel(item);
+    if (!hasAnySupportOS()) triggerComms("support_robot_os_required");
+    return true;
+  }
+  if (item.type === "procurement_terminal") {
+    showProcurementTerminal();
+    return true;
+  }
+  if (item.type === "shipping_hatch") {
+    showShippingTerminal();
+    return true;
+  }
+  return false;
+}
 
 function equipmentCleanText(item) {
   const dirt = Math.round(item.dirt || 0);
@@ -3756,8 +3796,12 @@ function updateEquipmentMenu(event) {
   if (distance < 22) {
     setEquipmentMenuAction(null);
   } else {
-    const action = Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? "stock" : "sell") : (dy < 0 ? "stock" : "sell");
-    const disabled = (action === "stock" && equipmentMenu.stockDisabled) || (action === "sell" && equipmentMenu.sellDisabled);
+    const action = equipmentMenu.automationAvailable && dy > 18 && Math.abs(dy) > Math.abs(dx) * 0.72
+      ? "automation"
+      : (dx < 0 ? "stock" : "sell");
+    const disabled = (action === "stock" && equipmentMenu.stockDisabled)
+      || (action === "sell" && equipmentMenu.sellDisabled)
+      || (action === "automation" && !equipmentMenu.automationAvailable);
     setEquipmentMenuAction(disabled ? null : action);
   }
   event.preventDefault();
@@ -3780,6 +3824,8 @@ function executeEquipmentMenuAction(kind, id, action) {
     returnItemToStock(kind, id);
   } else if (action === "sell") {
     sellOwnedItem(kind, id);
+  } else if (action === "automation") {
+    openAutomationPanelForEquipment(kind, id);
   }
 }
 
@@ -3790,6 +3836,7 @@ function openEquipmentMenu(element, event, options = {}) {
   clearEquipmentMenu();
   const stockDisabled = !canReturnEquipmentToStock(record.kind, record.item);
   const sellDisabled = !canSellEquipment(record.kind, record.item);
+  const automationAvailable = canOpenAutomationPanel(record.kind, record.item);
   const menu = document.createElement("div");
   menu.className = `equipment-pie-menu ${options.persistent ? "persistent-menu" : ""}`.trim();
   menu.style.left = `${event.clientX}px`;
@@ -3803,7 +3850,8 @@ function openEquipmentMenu(element, event, options = {}) {
       ${tags}
     </div>
     <button class="pie-action pie-stock ${stockDisabled ? "disabled" : ""}" data-pie-action="stock" type="button" ${stockDisabled ? "disabled" : ""}><span>STOCK</span></button>
-    <button class="pie-action pie-sell ${sellDisabled ? "disabled" : ""}" data-pie-action="sell" type="button" ${sellDisabled ? "disabled" : ""}><span>SELL</span></button>`;
+    <button class="pie-action pie-sell ${sellDisabled ? "disabled" : ""}" data-pie-action="sell" type="button" ${sellDisabled ? "disabled" : ""}><span>SELL</span></button>
+    ${automationAvailable ? `<button class="pie-action pie-auto" data-pie-action="automation" type="button"><span>AUTO</span></button>` : ""}`;
   document.body.appendChild(menu);
   if (options.persistent) {
     menu.querySelectorAll("[data-pie-action]").forEach((button) => {
@@ -3829,6 +3877,7 @@ function openEquipmentMenu(element, event, options = {}) {
     activeAction: null,
     stockDisabled,
     sellDisabled,
+    automationAvailable,
     persistent: Boolean(options.persistent)
   };
   if (element.setPointerCapture) {
@@ -4069,7 +4118,38 @@ function dragAnchorForItem(item, kind, clientX, clientY) {
   return { x: nearest.x, y: nearest.y };
 }
 
+function movingCoverageRadius(item, kind) {
+  if (kind !== "device") return 0;
+  if (item.type === "support_robot") return supportRobotRange(item);
+  return Number(FLOOR_DEVICES[item.type]?.radius) || 0;
+}
+
+function highlightMovingCoverage(item, kind, originX, originY) {
+  const radius = movingCoverageRadius(item, kind);
+  if (radius <= 0) return;
+  const size = footprint({ ...item, kind });
+  const centerX = originX + Math.floor((size.width - 1) / 2);
+  const centerY = originY + Math.floor((size.height - 1) / 2);
+  for (let y = centerY - radius; y <= centerY + radius; y += 1) {
+    for (let x = centerX - radius; x <= centerX + radius; x += 1) {
+      if (!isWithinGridRange(x, y, centerX, centerY, radius)) continue;
+      const cell = document.querySelector(`[data-grid-x="${x}"][data-grid-y="${y}"]`);
+      if (cell && !cell.classList.contains("blocked-cell")) {
+        cell.classList.add("moving-coverage", `moving-coverage-${item.type}`);
+      }
+    }
+  }
+}
+
+function clearMovingCoverageClasses(element) {
+  element.classList.remove("dragging", "drop-target", "drop-footprint", "seed-drop-target", "moving-coverage");
+  Array.from(element.classList)
+    .filter((className) => className.startsWith("moving-coverage-"))
+    .forEach((className) => element.classList.remove(className));
+}
+
 function highlightDragFootprint(item, kind, originX, originY) {
+  highlightMovingCoverage(item, kind, originX, originY);
   const size = footprint({ ...item, kind });
   for (let offsetY = 0; offsetY < size.height; offsetY += 1) {
     for (let offsetX = 0; offsetX < size.width; offsetX += 1) {
@@ -4593,16 +4673,15 @@ function handleFacilityEquipmentTap(element, event) {
   if (deviceButton) {
     const device = currentFloorDevices().find((entry) => entry.id === deviceButton.dataset.selectDevice);
     if (device?.type === "support_robot") {
-      showSupportRobotPanel(device);
-      if (!hasAnySupportOS()) triggerComms("support_robot_os_required");
+      setStatus("Support robot selected. Long press or right click, then choose AUTO.");
       return true;
     }
     if (device?.type === "procurement_terminal") {
-      showProcurementTerminal();
+      setStatus("Procurement terminal selected. Long press or right click, then choose AUTO.");
       return true;
     }
     if (device?.type === "shipping_hatch") {
-      showShippingTerminal();
+      setStatus("Shipping hatch selected. Long press or right click, then choose AUTO.");
       return true;
     }
     if (device) {
@@ -4763,7 +4842,7 @@ function sellBatch(batchId) {
     renderMarkets();
     return;
   }
-  if (!MARKETS[selectedMarket].accepts.includes(batch.crop)) {
+  if (!canSellCropToMarket(batch.crop, selectedMarket)) {
     toast("Action unavailable right now.", "warning");
     rejectFeedback();
     return;
@@ -5070,7 +5149,7 @@ function buySeedsByRobot() {
 }
 
 function sellInventoryByRobot(cropId, marketId) {
-  if (!isMarketAvailable(marketId) || !MARKETS[marketId]?.accepts.includes(cropId)) return false;
+  if (!canSellCropToMarket(cropId, marketId)) return false;
   const batches = state.inventory.filter((item) => item.crop === cropId && Math.max(0, Number(item.qty) || 0) > 0);
   if (!batches.length) return false;
 
@@ -5116,7 +5195,7 @@ function sellInventoryByRobot(cropId, marketId) {
 function sellConfiguredInventoryByRobot() {
   let soldAny = false;
   configuredShippingEntries().forEach(([cropId, config]) => {
-    if (!MARKETS[config.marketId]?.accepts.includes(cropId) || !isMarketAvailable(config.marketId)) return;
+    if (!canSellCropToMarket(cropId, config.marketId)) return;
     const hasStock = state.inventory.some((item) => item.crop === cropId && Math.max(0, Number(item.qty) || 0) > 0);
     if (!hasStock) return;
     if (sellInventoryByRobot(cropId, config.marketId)) soldAny = true;
@@ -5319,19 +5398,32 @@ function procurementSelectedPanel() {
     <small class="automation-hint">${locked ? "この種はまだ購入できません。" : `目標 ${crop.packSize * config.packs}粒を下回ると1パックずつ購入します。`}</small>
   </div>`;
 }
+function availableShippingMarketsForCrop(cropId) {
+  return Object.entries(MARKETS).filter(([marketId]) => canSellCropToMarket(cropId, marketId));
+}
+
 function shippingMarketButtons(cropId, selectedMarketId) {
-  return Object.entries(MARKETS).map(([marketId, market]) => `<button class="${automationButtonClass(marketId === selectedMarketId)}" data-auto-action="ship-market" data-crop-id="${cropId}" data-market-id="${marketId}" ${isMarketAvailable(marketId) && market.accepts.includes(cropId) ? "" : "disabled"}>${escapeHtml(market.name)}</button>`).join("");
+  const markets = availableShippingMarketsForCrop(cropId);
+  if (!markets.length) return `<span class="automation-empty">NO AVAILABLE MARKET</span>`;
+  return markets.map(([marketId, market]) => `<button class="${automationButtonClass(marketId === selectedMarketId)}" data-auto-action="ship-market" data-crop-id="${cropId}" data-market-id="${marketId}">${escapeHtml(market.name)}</button>`).join("");
 }
 
 function shippingSelectedPanel() {
   const cropId = CROPS[state.automation.shipping.selectedCropId] ? state.automation.shipping.selectedCropId : "lettuce";
   const config = state.automation.shipping.byCrop[cropId] || { enabled: false, marketId: "lower", qty: 1 };
+  const markets = availableShippingMarketsForCrop(cropId);
+  if (markets.length && !canSellCropToMarket(cropId, config.marketId)) {
+    config.marketId = markets[0][0];
+    config.enabled = false;
+  } else if (!markets.length) {
+    config.enabled = false;
+  }
   return `<div class="automation-detail-card">
     ${selectedAutomationCropCard(cropId, "shipping")}
-    <div class="automation-row compact"><strong>出荷</strong><button class="${automationButtonClass(config.enabled)}" data-auto-action="ship-toggle" data-crop-id="${cropId}">${config.enabled ? "ONLINE" : "OFFLINE"}</button></div>
+    <div class="automation-row compact"><strong>出荷</strong><button class="${automationButtonClass(config.enabled)}" data-auto-action="ship-toggle" data-crop-id="${cropId}" ${markets.length ? "" : "disabled"}>${markets.length ? (config.enabled ? "ONLINE" : "OFFLINE") : "NO ROUTE"}</button></div>
     <div class="automation-row compact market-row"><strong>MARKET</strong><div class="automation-buttons market-buttons">${shippingMarketButtons(cropId, config.marketId)}</div></div>
     <p class="automation-hint">在庫がある場合、この作物を一括で自動出荷します。</p>
-    <small class="automation-hint">${supportAutomationRunHint("shipping_hatch")}</small>
+    <small class="automation-hint">${markets.length ? supportAutomationRunHint("shipping_hatch") : "この作物を出荷できる解放済み市場がありません。"}</small>
   </div>`;
 }
 function showProcurementTerminal() {
@@ -5384,8 +5476,8 @@ function handleAutomationControl(button) {
   if (action === "ship-select" && CROPS[cropId]) state.automation.shipping.selectedCropId = cropId;
   if (action === "proc-toggle" && CROPS[cropId]) state.automation.procurement.byCrop[cropId].enabled = !state.automation.procurement.byCrop[cropId].enabled;
   if (action === "proc-packs" && CROPS[cropId]) state.automation.procurement.byCrop[cropId].packs = Math.max(1, Math.min(12, state.automation.procurement.byCrop[cropId].packs + Number(button.dataset.delta || 0)));
-  if (action === "ship-toggle" && CROPS[cropId]) state.automation.shipping.byCrop[cropId].enabled = !state.automation.shipping.byCrop[cropId].enabled;
-  if (action === "ship-market" && CROPS[cropId] && MARKETS[button.dataset.marketId]) state.automation.shipping.byCrop[cropId].marketId = button.dataset.marketId;
+  if (action === "ship-toggle" && CROPS[cropId] && availableShippingMarketsForCrop(cropId).length) state.automation.shipping.byCrop[cropId].enabled = !state.automation.shipping.byCrop[cropId].enabled;
+  if (action === "ship-market" && CROPS[cropId] && canSellCropToMarket(cropId, button.dataset.marketId)) state.automation.shipping.byCrop[cropId].marketId = button.dataset.marketId;
   playSound("tab_switch", 0.08);
   saveGame();
   if (action.startsWith("ship")) showShippingTerminal();
@@ -6366,16 +6458,18 @@ function renderFarm() {
     ? `<span class="placement-active">配置中 // ${placementItem.kind === "unit" ? GROW_UNITS[placementItem.type].name : FLOOR_DEVICES[placementItem.type].name}</span><div class="placement-tools"><small>空いているマスに置いてください</small><button type="button" data-cancel-placement>キャンセル</button></div>`
     : `<span class="facility-toolbar-status">${dirtyCount ? `<b class="clean-alert">清掃 ${dirtyCount}</b>` : ""}</span>`;
 
-  const coverageDevices = floorDevices.filter((device) => {
+  const coverageDevices = floorDevices.map((device) => {
     const definition = FLOOR_DEVICES[device.type];
-    return device.placed && definition && Number(definition.radius) > 0;
-  });
+    const radius = device.type === "support_robot" ? supportRobotRange(device) : Number(definition?.radius) || 0;
+    const center = itemGridCenter(device, "device");
+    return { ...device, coverageRadius: radius, coverageX: center.x, coverageY: center.y };
+  }).filter((device) => device.placed && device.coverageRadius > 0);
   const cellMarkup = Array.from({ length: base.cols * base.rows }, (_, index) => {
     const x = index % base.cols;
     const y = Math.floor(index / base.cols);
     const blocked = isBlockedCell(base, x, y);
     const coverageTypes = coverageDevices
-      .filter((device) => Math.max(Math.abs(x - device.x), Math.abs(y - device.y)) <= FLOOR_DEVICES[device.type].radius)
+      .filter((device) => isWithinGridRange(x, y, device.coverageX, device.coverageY, device.coverageRadius))
       .map((device) => device.type);
     const coverageClass = !blocked && coverageTypes.length
       ? ["covered", ...new Set(coverageTypes.map((type) => `covered-${type}`))].join(" ")
@@ -6615,7 +6709,7 @@ function renderMarkets(direction = "") {
   }).join("") : "";
 
   document.getElementById("price-grid").innerHTML = Object.entries(CROPS).filter(([cropId]) =>
-    MARKETS[selectedMarket].accepts.includes(cropId)
+    canMarketAcceptCrop(cropId, selectedMarket)
   ).map(([cropId, crop]) => {
     const fluctuation = state.marketFluctuation[cropId];
     const demand = cropDemandMultiplier(cropId, selectedMarket);
@@ -6650,8 +6744,8 @@ function renderInventory() {
     const crop = CROPS[batch.crop];
     const batchQty = Math.max(0, Number(batch.qty) || 0);
     const qty = Math.min(batchQty, saleQuantities[batch.id] || 1);
-    const unitPrice = getUnitPrice(batch);
-    const accepted = MARKETS[selectedMarket].accepts.includes(batch.crop);
+    const accepted = canSellCropToMarket(batch.crop, selectedMarket);
+    const unitPrice = accepted ? getUnitPrice(batch) : 0;
     return `<div class="inventory-row" style="--crop-color:${crop.color};--quality-color:${QUALITY[batch.quality].color}">
       <div class="inventory-crop">
         <span class="crop-glyph"><img src="${crop.icon}" alt=""></span>
@@ -6659,7 +6753,7 @@ function renderInventory() {
       </div>
       <div class="quality-cell"><span class="quality-badge">${batch.quality}</span></div>
       <div class="age-cell"><span class="inventory-label">AGE</span><br><strong>${batch.age} DAY</strong></div>
-      <div class="unit-price-cell"><span class="inventory-label">UNIT</span><br><strong>₡${formatNumber(unitPrice)}</strong></div>
+      <div class="unit-price-cell"><span class="inventory-label">UNIT</span><br><strong>${accepted ? `₡${formatNumber(unitPrice)}` : "--"}</strong></div>
       <div class="qty-control">
         <button data-qty-id="${batch.id}" data-delta="-1">-</button>
         <span>${qty}</span>
@@ -6719,13 +6813,19 @@ function shopCategoryCarouselPosition(categoryId) {
   return offset < 0 ? "far-left" : "far-right";
 }
 
+function cropResourcePreview(crop) {
+  const water = formatResource((Number(crop.water) || 0) * RESOURCE_CONSUMPTION_RATE * (Number(crop.days) || 1));
+  const nutrient = formatResource((Number(crop.nutrient) || 0) * RESOURCE_CONSUMPTION_RATE * (Number(crop.days) || 1));
+  return `1株目安 水 ${water} / 養液 ${nutrient}`;
+}
+
 function renderSeedShopCard(cropId, crop) {
   const available = isUnlocked("seed_item", cropId);
   return `
     <article class="shop-card ${available ? "" : "locked"}" style="--item-color:${crop.color}">
       <div class="shop-glyph"><img src="${crop.icon}" alt=""></div>
       <h3>${crop.name} 種子 x${crop.packSize}</h3>
-      <p>${available ? crop.note : unlockHint("seed_item", cropId, crop.note)}<br>${crop.packSize}粒パック / 成長 ${crop.days}日</p>
+      <p>${available ? crop.note : unlockHint("seed_item", cropId, crop.note)}<br>${crop.packSize}粒パック / 成長 ${crop.days}日<br>${cropResourcePreview(crop)}</p>
       <footer>
         <span class="shop-price">₡${crop.seedPrice}</span>
         <button class="buy-button" data-buy-seed="${cropId}" ${!available || state.money < crop.seedPrice ? "disabled" : ""}>${available ? `購入 +${crop.packSize}` : "LOCKED"}</button>
@@ -6761,18 +6861,6 @@ function renderEquipmentShopCard(itemId, item) {
       <footer>
         <span class="shop-price">₡${price}</span>
         <button class="buy-button" data-buy-item="${itemId}" ${disabled ? "disabled" : ""}>${!available ? "LOCKED" : owned ? "OWNED" : "BUY"}</button>
-      </footer>
-    </article>`;
-}
-
-function renderProcurementRefreshCard() {
-  return `<article class="shop-card lineup-card">
-      <div class="shop-glyph"><img src="${text("procurement_refresh_icon", "assets/icons/seed.webp")}" alt=""></div>
-      <h3>${text("procurement_refresh_title", "タグ付き在庫更新")}</h3>
-      <p>${text("procurement_refresh_copy", "Mara searches alternate equipment routes. Performance tags change after each refresh.")}</p>
-      <footer>
-        <span class="shop-price">₡${PROCUREMENT_REROLL_FEE}</span>
-        <button class="buy-button" data-refresh-procurement ${state.money < PROCUREMENT_REROLL_FEE ? "disabled" : ""}>${text("procurement_refresh_button", "更新")}</button>
       </footer>
     </article>`;
 }
@@ -6818,7 +6906,7 @@ function renderShop(direction = "") {
   const itemCards = (category.items || [])
     .filter((itemId) => EQUIPMENT[itemId])
     .map((itemId) => renderEquipmentShopCard(itemId, EQUIPMENT[itemId]));
-  grid.innerHTML = `${category.showRefresh ? renderProcurementRefreshCard() : ""}${itemCards.join("")}`
+  grid.innerHTML = itemCards.join("")
     || `<div class="inventory-empty">このカテゴリの取引はありません</div>`;
 }
 
@@ -7138,16 +7226,15 @@ function bindEvents() {
       if (!isOpaqueEquipmentPointer(deviceButton, event)) return;
       const device = currentFloorDevices().find((entry) => entry.id === deviceButton.dataset.selectDevice);
       if (device?.type === "support_robot") {
-        showSupportRobotPanel(device);
-        if (!hasAnySupportOS()) triggerComms("support_robot_os_required");
+        setStatus("Support robot selected. Long press or right click, then choose AUTO.");
         return;
       }
       if (device?.type === "procurement_terminal") {
-        showProcurementTerminal();
+        setStatus("Procurement terminal selected. Long press or right click, then choose AUTO.");
         return;
       }
       if (device?.type === "shipping_hatch") {
-        showShippingTerminal();
+        setStatus("Shipping hatch selected. Long press or right click, then choose AUTO.");
         return;
       }
       if (device) setStatus(`${FLOOR_DEVICES[device.type].name}が低く唸っています。周囲の空気だけが少し違う速度で動いています。`);
@@ -7219,9 +7306,6 @@ function bindEvents() {
 
     const buyItemButton = event.target.closest("[data-buy-item]");
     if (buyItemButton) buyEquipment(buyItemButton.dataset.buyItem);
-
-    const refreshProcurementButton = event.target.closest("[data-refresh-procurement]");
-    if (refreshProcurementButton) refreshProcurementLineup();
 
     const qtyButton = event.target.closest("[data-qty-id]");
     if (qtyButton) changeSaleQty(qtyButton.dataset.qtyId, Number(qtyButton.dataset.delta));
@@ -7427,7 +7511,7 @@ function bindEvents() {
     const cell = dragPayload.type === "equipment"
       ? gridCellAtPoint(event.clientX, event.clientY)
       : hovered && hovered.closest("[data-grid-x][data-grid-y]");
-    document.querySelectorAll(".drop-target, .drop-footprint, .seed-drop-target").forEach((element) => element.classList.remove("drop-target", "drop-footprint", "seed-drop-target"));
+    document.querySelectorAll(".drop-target, .drop-footprint, .seed-drop-target, .moving-coverage").forEach(clearMovingCoverageClasses);
     pointerDrag.dropOrigin = null;
     pointerDrag.dropUnitId = null;
     if (dragPayload.type === "seed" && slot) {
@@ -7634,9 +7718,7 @@ function clearDragState() {
   if (pointerDrag && pointerDrag.ghost) pointerDrag.ghost.remove();
   pointerDrag = null;
   document.body.classList.remove("drag-active", "equipment-drag-active");
-  document.querySelectorAll(".dragging, .drop-target, .drop-footprint, .seed-drop-target").forEach((element) => {
-    element.classList.remove("dragging", "drop-target", "drop-footprint", "seed-drop-target");
-  });
+  document.querySelectorAll(".dragging, .drop-target, .drop-footprint, .seed-drop-target, .moving-coverage").forEach(clearMovingCoverageClasses);
 }
 
 async function bootstrap() {
