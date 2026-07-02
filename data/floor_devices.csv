@@ -1,6 +1,6 @@
-id,name,code,width,height,radius,upkeep,icon,sprite,color
-light,区画LEDライト,AREA LIGHT,1,1,2,4,assets/icons/led.webp,assets/equipment/light-iso-tall-v2.png,#f5d65b
-fan,区画循環ファン,AREA FAN,1,1,2,3,assets/icons/fan.webp,assets/equipment/fan-iso-tall-v2.png,#48dbea
-support_robot,サポートロボット,SUPPORT ROBOT,1,1,2,0,assets/icons/supportRobot.webp,assets/characters/supportRobot-iso-leftdown.png,#48dbea
-procurement_terminal,設置型調達端末,PROC TERMINAL,1,1,0,2,assets/equipment/procurement-terminal-iso-v1.png,assets/equipment/procurement-terminal-iso-v1.png,#72ffb8
-shipping_hatch,出荷用搬出口,SHIP HATCH,1,1,0,2,assets/equipment/shipping-hatch-iso-v1.png,assets/equipment/shipping-hatch-iso-v1.png,#f5d65b
+﻿"id","name","code","width","height","radius","upkeep","icon","sprite","color","dirtMod"
+"light","区画LEDライト","AREA LIGHT","1","1","2","4","assets/icons/led.webp","assets/equipment/light-iso-tall-v2.png","#f5d65b","1"
+"fan","区画循環ファン","AREA FAN","1","1","2","3","assets/icons/fan.webp","assets/equipment/fan-iso-tall-v2.png","#48dbea","1"
+"support_robot","サポートロボット","SUPPORT ROBOT","1","1","2","0","assets/icons/supportRobot.webp","assets/characters/supportRobot-iso-leftdown.png","#48dbea","1"
+"procurement_terminal","設置型調達端末","PROC TERMINAL","1","1","0","2","assets/equipment/procurement-terminal-iso-v1.png","assets/equipment/procurement-terminal-iso-v1.png","#72ffb8","1"
+"shipping_hatch","出荷用搬出口","SHIP HATCH","1","1","0","2","assets/equipment/shipping-hatch-iso-v1.png","assets/equipment/shipping-hatch-iso-v1.png","#f5d65b","1"

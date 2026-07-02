@@ -1,3 +1,3 @@
-id,name,code,slots,price,upkeep,width,height,continuous,icon,sprite,emptySprite,description
-pod,栽培ポッド,GROW POD,1,120,1,1,1,false,assets/icons/seed.webp,assets/equipment/pod-empty.png,assets/equipment/pod-empty.png,1苗用の小型密閉設備。植え付け時に水・養液を一括投入し、収穫まで追加消費なし。
-box,栽培ボックス,GROW BOX,6,720,7,3,2,false,assets/icons/fridge.webp,assets/equipment/box-empty-gridfit-v1.png,assets/equipment/box-empty-gridfit-v1.png,6株を育成できる循環式設備。植え付け時の一括投入だけで管理できる。
+﻿"id","name","code","slots","price","upkeep","width","height","continuous","icon","sprite","emptySprite","description","dirtMod"
+"pod","栽培ポッド","GROW POD","1","120","1","1","1","false","assets/icons/seed.webp","assets/equipment/pod-empty.png","assets/equipment/pod-empty.png","1苗用の小型密閉設備。植え付け時に水・養液を一括投入し、収穫まで追加消費なし。","2.2"
+"box","栽培ボックス","GROW BOX","6","720","7","3","2","false","assets/icons/fridge.webp","assets/equipment/box-empty-gridfit-v1.png","assets/equipment/box-empty-gridfit-v1.png","6株を育成できる循環式設備。植え付け時の一括投入だけで管理できる。","1.35"

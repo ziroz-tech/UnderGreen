@@ -1,4 +1,4 @@
-﻿key,selector,attribute,text
+key,selector,attribute,text
 document_title,title,text,UNDERGREEN | 違法水耕栽培シミュレーション
 player_role,.player-profile small,text,ILLEGAL GROWER
 player_name,.player-profile strong,text,オペレーター
@@ -54,7 +54,3 @@ property_broker_portrait,.property-contact img,src,assets/characters/property-br
 property_broker_portrait_alt,.property-contact img,alt,不動産ブローカー
 comms_default_icon,#comms-icon,src,assets/characters/seed-broker.png
 comms_fallback_icon,,,assets/icons/credit.webp
-procurement_refresh_title,,,タグ付き在庫更新
-procurement_refresh_copy,,,マーラが別ルートの設備在庫を探します。更新ごとに性能タグが変わります。
-procurement_refresh_button,,,更新
-procurement_refresh_icon,,,assets/icons/seed.webp

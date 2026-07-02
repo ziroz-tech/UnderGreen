@@ -1,5 +1,5 @@
-﻿id,name,contact,portrait,description,risk,multipliers,accepts,unlockHint
+id,name,contact,portrait,description,risk,multipliers,accepts,unlockHint
 lower,下層市場,カイ // 配給横流し屋,assets/characters/market-lower.png,「とにかく腹を満たせる食べ物だ。空腹のまま生きるのは辛い。」,LOW RISK,lettuce:0.9|spinach:0.9|basil:0.35|tomato:0.82,lettuce|spinach|basil|tomato,初期取引先
-medical,医療・実験区画市場,ドクター・イオ // 調達官,assets/characters/market-medical.png,「香草や薬草があれば高く買い取ります。たとえ気休めであっても、患者には必要です。」,MEDIUM RISK,lettuce:0.42|spinach:0.45|basil:0.42|tomato:0.38|strawberry:0.25|melon:0.22|chamomile:1.65|rosemary:1.75|aconite:0.8,lettuce|spinach|basil|tomato|chamomile|rosemary,バジル3株販売・累計売上₡1,400
-upper,上層富裕市場,セラ・ヴェイル // フィクサー,assets/characters/market-upper.png,「レタスで食卓は飾れないわ。箱を開けた瞬間、客が息を止めるものを持ってきて頂戴。」,HIGH RETURN,lettuce:0.35|spinach:0.34|basil:0.38|tomato:0.36|strawberry:1.85|melon:2.15|chamomile:0.28|rosemary:0.3|aconite:0.5,lettuce|spinach|basil|tomato|strawberry|melon,トマト4株販売・累計25株販売・売上₡4,200
-rebel,反体制派市場,ナギ // 地下補給局,assets/characters/market-rebel.png,「戦うにも考えるにも、レタスが、食糧が必要だ。あるだけ買い取る。金に糸目はつけない。」,REVOLUTIONARY ROUTE,lettuce:1.25|spinach:1.3|basil:1.05|tomato:1.25|strawberry:0.45|melon:0.38|chamomile:0.45|rosemary:0.48|aconite:2.25,lettuce|spinach|basil|tomato|aconite,下層へ₡4,000販売・トマト4株販売
+medical,医療・実験区画市場,ドクター・イオ // 調達官,assets/characters/market-medical.png,「香草や薬草があれば高く買い取ります。たとえ気休めであっても、患者には必要です。」,MEDIUM RISK,chamomile:1.65|rosemary:1.75,chamomile|rosemary,バジル3株販売・累計売上₡1,400
+upper,上層富裕市場,セラ・ヴェイル // フィクサー,assets/characters/market-upper.png,「レタスで食卓は飾れないわ。箱を開けた瞬間、客が息を止めるものを持ってきて頂戴。」,HIGH RETURN,tomato:1.15|strawberry:1.85|melon:2.15,tomato|strawberry|melon,トマト4株販売・累計25株販売・売上₡4,200
+rebel,反体制派市場,ナギ // 地下補給局,assets/characters/market-rebel.png,「戦うにも考えるにも、レタスが、食糧が必要だ。あるだけ買い取る。金に糸目はつけない。」,REVOLUTIONARY ROUTE,lettuce:1.25|spinach:1.3|basil:1.05|aconite:2.25,lettuce|spinach|basil|aconite,下層へ₡4,000販売・トマト4株販売

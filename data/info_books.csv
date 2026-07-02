@@ -1,0 +1,3 @@
+id,order,title,kicker,description,thumbnail,defaultEntryId,style,unlocked
+"gardening_intro","1","よくわかる園芸入門","OLD WORLD GARDENING","古い友人から譲り受けた旧世界の園芸書だ。今では役に立たない知識もあるが、禁じられたさまざまな知識が手に入る。","assets/icons/lettuce.webp","lettuce","book","true"
+"notebook","2","メモ帳","PRIVATE NOTES","忘れないように、いろいろメモをしている。","assets/characters/protagonist.png","shelter","handwritten","true"
