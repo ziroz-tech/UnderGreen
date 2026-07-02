@@ -2,11 +2,11 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=131">
+    <link rel="stylesheet" href="styles.css?v=143">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -31,7 +31,8 @@
           <small id="time-remaining">20.0 SEC</small>
         </div>
       </div>
-      <button class="icon-button" id="reset-button" title="終了" aria-label="終了">⏻</button>
+      <button class="icon-button fullscreen-button" id="fullscreen-button" type="button" title="Fullscreen mode" aria-label="Fullscreen mode" aria-pressed="false">FS</button>
+      <button class="icon-button" id="reset-button" type="button" title="終了" aria-label="終了">⏻</button>
     </header>
 
     <section class="news-ticker">
@@ -73,6 +74,7 @@
       <button class="tab" data-tab="schedule"><span>04</span>予定表</button>
       <button class="tab" data-tab="broker"><span>05</span>不動産ブローカー</button>
       <button class="tab" data-tab="radio"><span>06</span>ラジオ</button>
+      <button class="tab" data-tab="info"><span>07</span>情報</button>
     </nav>
 
     <main>
@@ -90,10 +92,10 @@
               <div class="facility-grid-toolbar" id="facility-grid-toolbar"></div>
               <div class="facility-clean-tools" aria-label="清掃ツール">
                 <span class="tool-palette-label">TOOLBOX</span>
-                <button class="clean-tool-button tool-brush" data-clean-tool="brush" type="button" aria-label="ブラシ">
+                <button class="clean-tool-button tool-brush" data-clean-tool="brush" data-tooltip="BRUSH // こすって清掃" type="button" aria-label="ブラシ" title="ブラシ // こすって清掃">
                   <img class="clean-tool-icon" src="assets/icons/clean-brush.webp?v=2" alt="" draggable="false">
                 </button>
-                <button class="clean-tool-button tool-bucket" data-clean-tool="bucket" type="button" aria-label="バケツ">
+                <button class="clean-tool-button tool-bucket" data-clean-tool="bucket" data-tooltip="BUCKET // 水で洗浄" type="button" aria-label="バケツ" title="バケツ // 水で洗浄">
                   <img class="clean-tool-icon" src="assets/icons/clean-bucket.webp?v=2" alt="" draggable="false">
                 </button>
               </div>
@@ -225,6 +227,26 @@
           </section>
         </div>
       </section>
+      <section class="screen" id="info-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">ARCHIVE / FIELD NOTES</p>
+            <h2>情報</h2>
+          </div>
+          <div class="heading-stats" id="info-summary"></div>
+        </div>
+        <div class="info-layout">
+          <aside class="info-library">
+            <div class="section-label"><span>BOOKS</span><small>CSVで本を追加</small></div>
+            <div class="info-book-list" id="info-book-list"></div>
+          </aside>
+          <aside class="info-entry-panel">
+            <div class="section-label"><span>INDEX</span><small>項目を選択</small></div>
+            <div class="info-entry-list" id="info-entry-list"></div>
+          </aside>
+          <section class="info-reader" id="info-detail"></section>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -331,6 +353,6 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=160"></script>
+  <script src="game.js?v=169"></script>
 </body>
 </html>

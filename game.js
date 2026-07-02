@@ -24,6 +24,8 @@ let AMBIENT_LAYERS = {};
 let RADIO_PROGRAMS = {};
 let UNLOCK_RULES = [];
 let SCHEDULE_RUMORS = [];
+let INFO_BOOKS = {};
+let INFO_ENTRIES = [];
 
 const QUALITY = {
   C: { multiplier: 0.7, color: "#ff765e" },
@@ -136,6 +138,9 @@ const FACILITY_ZOOM_MIN = 0.65;
 const FACILITY_ZOOM_MAX = 1.8;
 const FACILITY_ZOOM_STEP = 0.12;
 const FACILITY_INITIAL_ZOOM = 1.44;
+const UI_SCALE_BASE_WIDTH = 1900;
+const UI_SCALE_BASE_HEIGHT = 1060;
+const UI_SCALE_MAX = 1.45;
 const SPRITE_ALPHA_THRESHOLD = 18;
 const BOOT_ASSET_TIMEOUT_MS = 20000;
 const AUDIO_CACHE_BUSTER = Date.now().toString(36);
@@ -144,6 +149,8 @@ let state;
 let selectedSeed = "lettuce";
 let selectedMarket = "lower";
 let selectedShopCategory = "seeds";
+let selectedInfoBookId = "gardening_intro";
+let selectedInfoEntryId = "";
 let saleQuantities = {};
 let selectedUnitId = null;
 let selectedDeviceId = null;
@@ -180,6 +187,138 @@ let startModeView = "day30";
 let startTitleTapCount = 0;
 let startTitleTapAt = 0;
 const COMMS_DEDUPE_TRIGGERS = new Set(["plant_resource_shortage", "resource_low"]);
+const GAME_TABS = ["farm", "market", "shop", "schedule", "broker", "radio", "info"];
+let currentUiScale = 1;
+let lastLogToastMessage = "";
+let lastLogToastAt = 0;
+
+function normalizeUiGuide(guide) {
+  if (!guide) return null;
+  if (typeof guide === "string") return guide.trim() ? { target: guide.trim() } : null;
+  const target = String(guide.target || "").trim();
+  return target ? { ...guide, target } : null;
+}
+
+function ensureUiGuideState() {
+  if (!state) return null;
+  state.uiGuide = normalizeUiGuide(state.uiGuide);
+  return state.uiGuide;
+}
+
+function uiGuideSelectors(target) {
+  const value = String(target || "").trim();
+  if (!value) return [];
+  if (value.startsWith("tab:")) return [`[data-tab="${value.slice(4)}"]`];
+  if (value === "sell-lettuce") return [`[data-guide-target="${value}"]`, `[data-tab="market"]:not(.locked)`];
+  return [`[data-guide-target="${value}"]`];
+}
+
+function removeUiGuideHighlights() {
+  document.querySelectorAll(".guide-pulse").forEach((element) => {
+    element.classList.remove("guide-pulse");
+    element.removeAttribute("data-guide-active");
+  });
+}
+
+function isVisibleGuideTarget(element) {
+  if (!element) return false;
+  if (element.disabled || element.getAttribute("aria-disabled") === "true") return false;
+  if (element.classList.contains("locked") || element.closest(".locked")) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function applyUiGuide() {
+  removeUiGuideHighlights();
+  const guide = ensureUiGuideState();
+  if (!guide) return;
+  const matches = uiGuideSelectors(guide.target).flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+  const visibleMatches = matches.filter(isVisibleGuideTarget);
+  const targets = visibleMatches.length ? visibleMatches.slice(0, 3) : matches.slice(0, 1);
+  targets.forEach((element) => {
+    element.classList.add("guide-pulse");
+    element.setAttribute("data-guide-active", "true");
+  });
+}
+
+function setUiGuide(target, options = {}) {
+  if (!state || !target) return;
+  state.uiGuide = { target: String(target).trim(), setAt: Date.now() };
+  if (options.persist !== false) saveGame();
+  window.requestAnimationFrame(applyUiGuide);
+}
+
+function clearUiGuide(target = null, options = {}) {
+  const guide = ensureUiGuideState();
+  if (!guide) return false;
+  if (target && guide.target !== target) return false;
+  state.uiGuide = null;
+  removeUiGuideHighlights();
+  if (options.persist !== false) saveGame();
+  return true;
+}
+
+function clearUiGuideTargets(targets, options = {}) {
+  const guide = ensureUiGuideState();
+  if (!guide) return false;
+  const list = Array.isArray(targets) ? targets : [targets];
+  return list.includes(guide.target) ? clearUiGuide(null, options) : false;
+}
+
+function preferredUiScale() {
+  const width = window.innerWidth || document.documentElement.clientWidth || 0;
+  const height = window.innerHeight || document.documentElement.clientHeight || 0;
+  if (width < 1800 || height < 940) return 1;
+  const scale = Math.min(width / UI_SCALE_BASE_WIDTH, height / UI_SCALE_BASE_HEIGHT);
+  return Math.max(1, Math.min(UI_SCALE_MAX, Math.round(scale * 100) / 100));
+}
+
+function applyUiScale() {
+  const scale = preferredUiScale();
+  currentUiScale = scale;
+  document.documentElement.style.setProperty("--ui-scale", scale.toFixed(2));
+  document.body?.classList.toggle("ui-scale-large", scale > 1.01);
+  document.body?.setAttribute("data-ui-scale", scale.toFixed(2));
+}
+
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+}
+
+function updateFullscreenButton() {
+  const button = document.getElementById("fullscreen-button");
+  if (!button) return;
+  const active = Boolean(fullscreenElement());
+  button.classList.toggle("fullscreen-active", active);
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.textContent = active ? "WIN" : "FS";
+  button.title = active ? "Window mode" : "Fullscreen mode";
+  button.setAttribute("aria-label", button.title);
+}
+
+async function toggleFullscreenMode() {
+  const active = fullscreenElement();
+  const target = document.documentElement;
+  try {
+    if (active) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+      if (exit) await exit.call(document);
+    } else {
+      const request = target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
+      if (!request) {
+        toast("Fullscreen is not available in this browser.", "warning");
+        return;
+      }
+      await request.call(target);
+    }
+  } catch (error) {
+    console.warn(error);
+    toast("Fullscreen request was blocked.", "warning");
+  } finally {
+    updateFullscreenButton();
+    window.setTimeout(applyUiScale, 80);
+  }
+}
 
 const SCHEDULE_DAYS = 30;
 const SCHEDULE_REROLL_COST = 120;
@@ -445,6 +584,7 @@ async function loadExternalData() {
       width: toNumber(row.width),
       height: toNumber(row.height),
       continuous: toBool(row.continuous),
+      dirtMod: toNumber(row.dirtMod, 1),
       icon: row.icon,
       sprite: row.sprite,
       emptySprite: row.emptySprite,
@@ -459,6 +599,7 @@ async function loadExternalData() {
       height: toNumber(row.height),
       radius: toNumber(row.radius),
       upkeep: toNumber(row.upkeep),
+      dirtMod: toNumber(row.dirtMod, 1),
       icon: row.icon,
       sprite: row.sprite,
       color: row.color
@@ -567,6 +708,33 @@ async function loadExternalData() {
       unlocked: row.unlocked !== "false"
     }));
   });
+  await loadRequiredCsv("data/info_books.csv", (rows) => {
+    INFO_BOOKS = rowsToObject(rows, (row) => ({
+      order: toNumber(row.order, 0),
+      title: row.title,
+      kicker: row.kicker,
+      description: row.description,
+      thumbnail: row.thumbnail,
+      defaultEntryId: row.defaultEntryId,
+      style: row.style || "book",
+      unlocked: row.unlocked !== "false"
+    }));
+  });
+  await loadRequiredCsv("data/info_entries.csv", (rows) => {
+    INFO_ENTRIES = rows.map((row) => ({
+      bookId: row.bookId,
+      id: row.id,
+      order: toNumber(row.order, 0),
+      title: row.title,
+      kicker: row.kicker,
+      category: row.category,
+      thumbnail: row.thumbnail,
+      cropId: row.cropId,
+      body: row.body,
+      method: row.method,
+      protagonistNote: row.protagonistNote
+    })).filter((row) => row.bookId && row.id).sort((a, b) => a.order - b.order);
+  });
   await loadRequiredCsv("data/comm_events.csv", (rows) => {
     COMM_EVENTS = rows.map((row) => ({
       id: row.id,
@@ -643,6 +811,8 @@ function collectBootImageAssets() {
   });
   Object.values(AREA_PROFILES).forEach((entry) => addAssetUrl(urls, entry.image));
   Object.values(PLANT_STAGE_SPRITES).flat().forEach((url) => addAssetUrl(urls, url));
+  Object.values(INFO_BOOKS).forEach((entry) => addAssetUrl(urls, entry.thumbnail));
+  INFO_ENTRIES.forEach((entry) => addAssetUrl(urls, entry.thumbnail));
   COMM_EVENTS.forEach((event) => addAssetUrl(urls, event.icon));
   Object.values(UI_TEXT).forEach((value) => addAssetUrl(urls, value));
   return [...urls];
@@ -720,6 +890,17 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function textBlockMarkup(value, className = "") {
+  const paragraphs = toList(value);
+  if (!paragraphs.length) return "";
+  const classAttr = className ? ` class="${escapeHtml(className)}"` : "";
+  return paragraphs.map((paragraph) => `<p${classAttr}>${escapeHtml(paragraph)}</p>`).join("");
+}
+
+function optionalImageMarkup(src, alt = "", className = "") {
+  return src ? `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">` : "";
 }
 
 
@@ -1078,6 +1259,8 @@ function createInitialState(mode = "normal") {
     brokerUnlocked: false,
     commsSeen: {},
     commsChoices: {},
+    openedTabs: { farm: true },
+    uiGuide: null,
     commsOpen: [],
     event: null,
     news: "",
@@ -1733,6 +1916,8 @@ function loadGame() {
   if (!Number.isFinite(Number(state.nextMarketForecastDay))) {
     state.nextMarketForecastDay = Math.max(3, (Number(state.day) || 1) + 2);
   }
+  ensureOpenedTabs();
+  ensureUiGuideState();
   ownedBases();
   ensureProcurementTags();
   state.marketTabUnlocked = Boolean(state.marketTabUnlocked || state.tradeStats?.unitsSold > 0);
@@ -1817,6 +2002,7 @@ function switchBase(baseId) {
   setStatus(`Active base switched to ${currentBase().name}.`);
   saveGame();
   renderFarm();
+  updateTabIndicators();
   renderHeader();
 }
 
@@ -2749,14 +2935,16 @@ function renderUnitPlantSlots(unit, shelfIndex) {
     const crop = plant ? CROPS[plant.crop] : null;
     const ready = Boolean(plant?.ready);
     const dead = Boolean(plant?.dead);
+    const sRankReady = ready && plant?.quality === "S";
     const sprite = plantSprite(plant);
     const now = Date.now();
     const stagePulse = Boolean(plant?.stagePulseAt && now - plant.stagePulseAt < 1500);
     const readyPulse = Boolean(plant?.readyPulseAt && now - plant.readyPulseAt < 1900);
     const slotPulseClass = `${stagePulse ? "stage-pop" : ""} ${readyPulse ? "ready-pop" : ""}`.trim();
-    return `<span class="box-plant-slot ${plant ? "planted" : "empty"} ${ready ? "ready" : ""} ${dead ? "dead" : ""} ${slotPulseClass} stage-${stage}" data-shelf="${shelfIndex}" data-slot="${slotIndex}" data-box-plant-slot style="--slot-x:${slot.x}%;--slot-y:${slot.y}%;--slot-size:${slot.size}%;--slot-z:${slot.z};--crop-color:${crop?.color || "#72ffb8"}" role="button" aria-label="${crop ? `${crop.name} slot ${slotIndex + 1}` : `Empty slot ${slotIndex + 1}`}">
+    return `<span class="box-plant-slot ${plant ? "planted" : "empty"} ${ready ? "ready" : ""} ${sRankReady ? "s-rank-ready" : ""} ${dead ? "dead" : ""} ${slotPulseClass} stage-${stage}" data-shelf="${shelfIndex}" data-slot="${slotIndex}" data-box-plant-slot style="--slot-x:${slot.x}%;--slot-y:${slot.y}%;--slot-size:${slot.size}%;--slot-z:${slot.z};--crop-color:${crop?.color || "#72ffb8"}" role="button" aria-label="${crop ? `${crop.name} slot ${slotIndex + 1}` : `Empty slot ${slotIndex + 1}`}">
       ${sprite ? `<img class="box-plant-sprite" src="${sprite}" alt="" draggable="false">` : ""}
       ${ready ? `<span class="box-ready-dot"></span>` : ""}
+      ${sRankReady ? `<span class="s-rank-badge">S</span>` : ""}
     </span>`;
   }).join("")}</span>`;
 }
@@ -2841,10 +3029,51 @@ function resourceShortageContext(cropId, unit, cost) {
   };
 }
 
-function setStatus(message) {
+function logLabelForType(type = "status") {
+  if (type === "bot") return "BOT";
+  if (type === "warning") return "WARN";
+  if (type === "error") return "ERROR";
+  if (type === "notice") return "NOTICE";
+  if (type === "success") return "OK";
+  return "LOG";
+}
+
+function pushLogEntry(message, type = "status", options = {}) {
+  if (!message) return;
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const textValue = String(message);
+  const now = Date.now();
+  if (options.dedupe !== false && textValue === lastLogToastMessage && now - lastLogToastAt < 2200) return;
+  lastLogToastMessage = textValue;
+  lastLogToastAt = now;
+  const element = document.createElement("div");
+  element.className = `toast ${type}`.trim();
+  element.dataset.logType = type || "status";
+
+  const rail = document.createElement("i");
+  rail.className = "toast-rail";
+  const label = document.createElement("span");
+  label.className = "toast-kicker";
+  label.textContent = logLabelForType(type);
+  const body = document.createElement("span");
+  body.className = "toast-message";
+  body.textContent = textValue;
+  const sweep = document.createElement("i");
+  sweep.className = "toast-sweep";
+  element.append(rail, label, body, sweep);
+
+  container.prepend(element);
+  Array.from(container.children).slice(5).forEach((child) => child.remove());
+  window.setTimeout(() => element.classList.add("toast-aging"), 2800);
+  window.setTimeout(() => element.remove(), options.duration || 4800);
+}
+
+function setStatus(message, options = {}) {
   state.log = message;
   const status = document.getElementById("status-text");
   if (status) status.textContent = message;
+  if (options.log !== false) pushLogEntry(message, options.type || "status");
 }
 
 const soundPool = {};
@@ -3162,16 +3391,50 @@ function rejectFeedback() {
 }
 
 function toast(message, type = "") {
-  const element = document.createElement("div");
-  element.className = `toast ${type}`.trim();
-  element.textContent = message;
-  document.getElementById("toast-container").appendChild(element);
-  window.setTimeout(() => element.remove(), 3000);
+  pushLogEntry(message, type || "notice", { dedupe: false, duration: 4200 });
 }
 
 function botActionLog(message) {
-  setStatus(message);
+  setStatus(message, { log: false });
   toast(message, "bot");
+}
+
+function ensureOpenedTabs() {
+  state.openedTabs ||= {};
+  GAME_TABS.forEach((tabId) => {
+    if (typeof state.openedTabs[tabId] !== "boolean") state.openedTabs[tabId] = tabId === "farm";
+  });
+  state.openedTabs.farm = true;
+}
+
+function isTabAvailable(tabId) {
+  if (tabId === "market") return Boolean(state.marketTabUnlocked);
+  if (tabId === "shop") return Boolean(state.shopUnlocked);
+  if (tabId === "schedule") return Boolean(state.shopUnlocked);
+  if (tabId === "broker") return Boolean(state.brokerUnlocked);
+  return true;
+}
+
+function markTabOpened(tabId) {
+  ensureOpenedTabs();
+  if (!GAME_TABS.includes(tabId) || state.openedTabs[tabId]) return;
+  state.openedTabs[tabId] = true;
+  saveGame();
+}
+
+function updateTabIndicators() {
+  if (!state) return;
+  ensureOpenedTabs();
+  const cleaningNeeded = ownedBases().some((base) => [...base.shelves, ...base.floorDevices].some(needsCleaning));
+  document.querySelectorAll(".tab[data-tab]").forEach((tab) => {
+    const tabId = tab.dataset.tab;
+    const available = isTabAvailable(tabId);
+    const active = tab.classList.contains("active");
+    tab.classList.toggle("locked", !available);
+    tab.toggleAttribute("disabled", !available);
+    tab.classList.toggle("new-tab-alert", available && !active && !state.openedTabs[tabId]);
+    if (tabId === "farm") tab.classList.toggle("needs-cleaning-tab", cleaningNeeded);
+  });
 }
 
 function switchTab(tabId) {
@@ -3202,11 +3465,15 @@ function switchTab(tabId) {
   document.querySelectorAll(".screen").forEach((screen) => {
     screen.classList.toggle("active", screen.id === `${tabId}-screen`);
   });
+  markTabOpened(tabId);
+  clearUiGuide(`tab:${tabId}`, { persist: false });
+  updateTabIndicators();
   if (tabId === "schedule") {
     renderSchedule();
     triggerComms("schedule_opened");
   }
   if (tabId === "radio") renderRadio();
+  if (tabId === "info") renderInfo();
   if (previousTab !== tabId) {
     playSound("tab_switch", 0.18);
     hapticFeedback(8);
@@ -3400,6 +3667,14 @@ function runCommsEffect(effect) {
   }
   if (effect.action === "add_device" && effect.value) {
     if (grantFloorDevice(effect.value)) render();
+    return;
+  }
+  if (effect.action === "guide" && effect.value) {
+    setUiGuide(effect.value, { persist: false });
+    return;
+  }
+  if (effect.action === "clear_guide") {
+    clearUiGuide(effect.value || null, { persist: false });
     return;
   }
 }
@@ -4090,6 +4365,7 @@ function placeItemAt(kind, id, x, y, targetElement = null, options = {}) {
   setStatus(`${kind === "unit" ? GROW_UNITS[item.type].name : FLOOR_DEVICES[item.type].name}を区画 (${x + 1}, ${y + 1}) に設置しました。`);
   playSound("equipment_place");
   burstEffect(targetElement, kind === "unit" ? "#72ffb8" : FLOOR_DEVICES[item.type].color, 14);
+  clearUiGuideTargets([`place-${item.type}`, `place-${kind}-${item.type}`], { persist: false });
   triggerComms("first_place", { kind, itemId: item.type });
   updateProgressionUnlocks();
   saveGame();
@@ -4459,6 +4735,7 @@ function plantSeed(shelfIndex, slotIndex, cropId = selectedSeed, sourceElement =
     shelfIndex,
     slotIndex
   };
+  clearUiGuideTargets([`seed-${cropId}`, `plant-${cropId}`], { persist: false });
   triggerComms("first_plant", commsContext);
   triggerComms("plant", commsContext);
   saveGame();
@@ -4480,6 +4757,19 @@ function determineQuality(plant, hasLed, hasFan, qualityBonus = 0) {
   if (plant.waterShortage) index -= 1;
   if (plant.nutrientShortage) index -= 1;
   return ["C", "B", "A", "S"][Math.max(0, index)];
+}
+
+function triggerSRankReadyComms(plant, shelf, base = null) {
+  if (!plant || plant.quality !== "S") return;
+  triggerComms("first_s_rank_crop", {
+    cropId: plant.crop,
+    cropName: CROPS[plant.crop]?.name || plant.crop,
+    quality: plant.quality,
+    unitType: shelf?.type || "",
+    unitName: GROW_UNITS[shelf?.type]?.name || shelf?.type || "",
+    baseId: base?.id || "",
+    baseName: base?.name || ""
+  });
 }
 
 function harvest(shelfIndex, slotIndex, sourceElement = null) {
@@ -4848,6 +5138,8 @@ function sellBatch(batchId) {
     return;
   }
   const qty = Math.max(1, Math.min(batch.qty, saleQuantities[batchId] || 1));
+  const batchAge = Math.max(0, Number(batch.age) || 0);
+  const agedSale = batchAge >= 1;
   const unitPrice = getUnitPrice(batch);
   const revenue = unitPrice * qty;
   const moneyBeforeSale = state.money;
@@ -4886,9 +5178,14 @@ function sellBatch(batchId) {
     cropCategory: CROPS[batch.crop]?.category || "",
     qty,
     revenue,
-    quality: batch.quality
+    quality: batch.quality,
+    age: batchAge,
+    ageDays: batchAge,
+    aged: agedSale
   };
+  clearUiGuideTargets([`sell-${batch.crop}`], { persist: false });
   triggerComms("first_sale", commsContext);
+  if (agedSale) triggerComms("first_aged_sale", commsContext);
   triggerComms("sale", commsContext);
   if (selectedMarket === "medical" && CROPS[batch.crop].category === "medical") {
     triggerComms("medical_specialty_sale", commsContext);
@@ -4919,7 +5216,7 @@ function changeSaleQty(batchId, delta) {
 function processRealtimeGrowth(deltaDays) {
   const plants = activePlants().filter(({ plant }) => !plant.ready && !plant.dead);
   if (deltaDays <= 0) return;
-  processDirt(deltaDays);
+  if (state.timeUnlocked) processDirt(deltaDays);
   if (!plants.length) return;
 
   const continuousPlants = plants.filter(({ shelf }) => GROW_UNITS[shelf.type]?.continuous);
@@ -4952,7 +5249,8 @@ function processRealtimeGrowth(deltaDays) {
         updatePlantVisualStage(plant);
         const effects = getUnitEffects(shelf);
         plant.quality = determineQuality(plant, effects.light, effects.fan, perf.qualityBonus);
-      trackPlantReady(plant, shelf);
+        trackPlantReady(plant, shelf);
+        triggerSRankReadyComms(plant, shelf, base);
         toast(`${CROPS[plant.crop].name}が収穫可能になりました`);
         farmRenderRequested = true;
         playSound("crop_ready", 0.24);
@@ -4988,7 +5286,8 @@ function processRealtimeGrowth(deltaDays) {
       updatePlantVisualStage(plant);
       const effects = getUnitEffects(shelf);
       plant.quality = determineQuality(plant, effects.light, effects.fan, perf.qualityBonus);
-        trackPlantReady(plant, shelf);
+      trackPlantReady(plant, shelf);
+      triggerSRankReadyComms(plant, shelf, base);
       toast(`${CROPS[plant.crop].name}が収穫可能になりました`);
       farmRenderRequested = true;
       playSound("crop_ready", 0.24);
@@ -5002,7 +5301,8 @@ function processDirt(deltaDays) {
     [...base.shelves, ...base.floorDevices].forEach((item) => {
       const active = item.slots ? item.slots.some(Boolean) : item.placed;
       if (!active) return;
-      const dirtMod = (unitTagEffects(item).dirtMod || 1) * (baseEffects.dirtMod || 1);
+      const definition = item.slots ? GROW_UNITS[item.type] : FLOOR_DEVICES[item.type];
+      const dirtMod = (Number(definition?.dirtMod) || 1) * (unitTagEffects(item).dirtMod || 1) * (baseEffects.dirtMod || 1);
       const wasCleanEnough = !needsCleaning(item);
       item.dirt = Math.min(100, (item.dirt || 0) + deltaDays * 7 * dirtMod);
       if (wasCleanEnough && needsCleaning(item)) {
@@ -5156,11 +5456,16 @@ function sellInventoryByRobot(cropId, marketId) {
   let totalQty = 0;
   let totalRevenue = 0;
   let premiumSale = false;
+  let agedSale = false;
+  let maxBatchAge = 0;
   batches.forEach((batch) => {
     const amount = Math.max(0, Number(batch.qty) || 0);
     const unitPrice = getUnitPrice(batch, marketId);
     const revenue = unitPrice * amount;
+    const batchAge = Math.max(0, Number(batch.age) || 0);
     if (amount <= 0) return;
+    if (batchAge >= 1) agedSale = true;
+    maxBatchAge = Math.max(maxBatchAge, batchAge);
     totalQty += amount;
     totalRevenue += revenue;
     premiumSale = premiumSale || unitPrice >= bestAvailableQuote(batch) * 0.98;
@@ -5188,8 +5493,10 @@ function sellInventoryByRobot(cropId, marketId) {
   const marketName = MARKETS[marketId]?.name || marketId;
   botActionLog(`BOT // ${cropName} shipped to ${marketName}. x${totalQty} +C${formatNumber(totalRevenue)}`);
   playSoundFirst(["sell_crop", "sale"], premiumSale ? 0.18 : 0.12);
-  triggerComms("first_sale", { cropId, cropName, marketId, marketName, qty: totalQty, revenue: totalRevenue, automated: true });
-  triggerComms("sale", { cropId, cropName, marketId, marketName, qty: totalQty, revenue: totalRevenue, automated: true });
+  const commsContext = { cropId, cropName, marketId, marketName, qty: totalQty, revenue: totalRevenue, automated: true, age: maxBatchAge, ageDays: maxBatchAge, aged: agedSale };
+  triggerComms("first_sale", commsContext);
+  if (agedSale) triggerComms("first_aged_sale", commsContext);
+  triggerComms("sale", commsContext);
   return true;
 }
 function sellConfiguredInventoryByRobot() {
@@ -5312,6 +5619,7 @@ function processSupportRobots(deltaDays) {
       : document.getElementById("modal-title")?.textContent;
     if (activeModalTitle === "自動出荷設定") showShippingTerminal();
     if (activeModalTitle === "自動種子調達") showProcurementTerminal();
+    updateTabIndicators();
     renderHeader();
     saveGame();
     checkVictory();
@@ -5560,7 +5868,13 @@ function realtimeTick() {
   const now = Date.now();
   const elapsedMs = Math.min(1000, now - lastTickAt);
   lastTickAt = now;
-  if (startScreenOpen) return;
+  if (startScreenOpen || isCommsBlocking()) {
+    if (now - lastRenderAt >= 500) {
+      renderRuntime();
+      lastRenderAt = now;
+    }
+    return;
+  }
   if (state.ended || state.paused) {
     if (now - lastRenderAt >= 500) {
       renderRuntime();
@@ -5601,6 +5915,10 @@ function realtimeTick() {
 }
 
 function togglePause() {
+  if (isCommsBlocking()) {
+    setStatus("重要通信中です。通信を閉じるまで時計は停止しています。");
+    return;
+  }
   if (state.ended || !state.timeUnlocked) {
     setStatus("Tutorial link active. The day clock is locked, but plants continue growing.");
     return;
@@ -6345,6 +6663,7 @@ function renderHeader() {
   renderResourceAlert("water", state.water, resourceDemand().water);
   renderResourceAlert("nutrient", state.nutrient, resourceDemand().nutrient);
   renderNewsHistory();
+  updateFullscreenButton();
 }
 
 function newsHistoryTiming(entry) {
@@ -6482,7 +6801,6 @@ function renderFarm() {
   const placedUnits = shelves.filter((unit) => unit.placed).map((unit) => {
     const shelfIndex = shelves.findIndex((entry) => entry.id === unit.id);
     const definition = GROW_UNITS[unit.type];
-    const effects = getUnitEffects(unit);
     const occupied = unit.slots.filter(Boolean).length;
     const running = occupied > 0;
     const usesSlotWidget = Boolean(GROW_UNIT_SLOT_LAYOUTS[unit.type]?.length);
@@ -6490,12 +6808,11 @@ function renderFarm() {
     const spriteCrop = unitPrimaryCrop(unit);
     const plantSlots = renderUnitPlantSlots(unit, shelfIndex);
     const ready = unit.slots.some((plant) => plant?.ready);
-    return `<button class="facility-item grow-item type-${unit.type} ${usesSlotWidget ? "unit-widget" : ""} ${running ? "unit-running" : "unit-idle"} ${plantStageClass(unit)} ${ready ? "harvest-glow" : ""} ${needsCleaning(unit) ? "needs-cleaning" : ""} ${selectedUnitId === unit.id ? "selected" : ""}" aria-label="${definition.name} ${occupied}/${definition.slots}株 ${running ? "稼働中" : "停止中"}"
+    const sRankReady = unit.slots.some((plant) => plant?.ready && plant.quality === "S");
+    return `<button class="facility-item grow-item type-${unit.type} ${usesSlotWidget ? "unit-widget" : ""} ${running ? "unit-running" : "unit-idle"} ${plantStageClass(unit)} ${ready ? "harvest-glow" : ""} ${sRankReady ? "s-rank-ready" : ""} ${needsCleaning(unit) ? "needs-cleaning" : ""} ${selectedUnitId === unit.id ? "selected" : ""}" aria-label="${definition.name} ${occupied}/${definition.slots}株 ${running ? "稼働中" : "停止中"}"
       style="grid-column:${unit.x + 1}/span ${definition.width};grid-row:${unit.y + 1}/span ${definition.height};z-index:${20 + unit.y}"
       data-select-unit="${unit.id}" data-drag-kind="unit" data-drag-id="${unit.id}" data-sprite-crop="${spriteCrop}">
-      <img class="equipment-sprite growth-stage-sprite ${usesSlotWidget ? "widget-body-sprite" : ""}" src="${sprite}" alt="" draggable="false">${plantSlots}<span class="unit-aura"></span><span class="unit-power-state">${ready ? "READY" : running ? "ACTIVE" : "OFFLINE"}</span><span class="item-label"><strong>${definition.name}</strong><small>${occupied}/${definition.slots} plants</small></span>
-      ${needsCleaning(unit) ? `<span class="clean-badge">清掃</span>` : ""}
-      <span class="effect-dots"><i class="${effects.light ? "on light" : ""}">L</i><i class="${effects.fan ? "on fan" : ""}">F</i></span>
+      <img class="equipment-sprite growth-stage-sprite ${usesSlotWidget ? "widget-body-sprite" : ""}" src="${sprite}" alt="" draggable="false">${plantSlots}<span class="unit-aura"></span>${sRankReady ? `<span class="unit-rank-badge">S</span>` : ""}<span class="item-label"><strong>${definition.name}</strong><small>${occupied}/${definition.slots} plants</small></span>
     </button>`;
   }).join("");
 
@@ -6505,10 +6822,13 @@ function renderFarm() {
     return `<button class="facility-item floor-device device-${device.type} device-running ${needsCleaning(device) ? "needs-cleaning" : ""} ${selectedDeviceId === device.id ? "selected" : ""}"
       style="grid-column:${device.x + 1};grid-row:${device.y + 1};z-index:${20 + device.y}" data-select-device="${device.id}" data-drag-kind="device" data-drag-id="${device.id}">
       <img class="equipment-sprite" src="${definition.sprite}" alt="" draggable="false"><span class="device-field"></span><span class="item-label">${deviceLabel}</span>
-      ${needsCleaning(device) ? `<span class="clean-badge">清掃</span>` : ""}
     </button>`;
   }).join("");
 
+  const cleanMarkers = [
+    ...shelves.filter((unit) => unit.placed && needsCleaning(unit)).map((unit) => ({ kind: "unit", type: unit.type, id: unit.id })),
+    ...floorDevices.filter((device) => device.placed && needsCleaning(device)).map((device) => ({ kind: "device", type: device.type, id: device.id }))
+  ].map((marker) => `<span class="clean-marker clean-marker-${marker.kind} clean-marker-${marker.type}" data-clean-marker-kind="${marker.kind}" data-clean-marker-id="${marker.id}">清掃</span>`).join("");
   const grid = document.getElementById("facility-grid");
   const gridShell = document.querySelector(".facility-grid-shell");
   const metrics = isoGridMetrics(base);
@@ -6520,7 +6840,7 @@ function renderFarm() {
   grid.style.setProperty("--grid-cols", base.cols);
   grid.style.setProperty("--grid-rows", base.rows);
   applyFacilityView();
-  grid.innerHTML = cellMarkup + placedUnits + placedDevices;
+  grid.innerHTML = cellMarkup + placedUnits + placedDevices + cleanMarkers;
 
   grid.querySelectorAll(".facility-cell").forEach((cell) => {
     const x = Number(cell.dataset.gridX);
@@ -6550,6 +6870,15 @@ function renderFarm() {
     element.style.setProperty("--footprint-h", pos.size.height);
     element.style.zIndex = String(100 + equipmentVisualDepth(device, "device"));
   });
+  grid.querySelectorAll("[data-clean-marker-kind][data-clean-marker-id]").forEach((element) => {
+    const kind = element.dataset.cleanMarkerKind;
+    const collection = kind === "unit" ? shelves : floorDevices;
+    const item = collection.find((entry) => entry.id === element.dataset.cleanMarkerId);
+    if (!item) return;
+    const pos = equipmentIsoPosition(item, kind, base);
+    element.style.left = `${pos.x}px`;
+    element.style.top = `${pos.y}px`;
+  });
 
   const detailPanel = document.getElementById("selected-unit-panel");
   if (detailPanel) detailPanel.innerHTML = "";
@@ -6559,7 +6888,7 @@ const unplaced = sharedStockItems();
     const definition = kind === "unit" ? GROW_UNITS[item.type] : FLOOR_DEVICES[item.type];
     const active = placementSelection && placementSelection.id === item.id;
     const compatible = true;
-    const dragAttributes = `data-place-kind="${kind}" data-place-id="${item.id}" data-drag-kind="${kind}" data-drag-id="${item.id}"`;
+    const dragAttributes = `data-place-kind="${kind}" data-place-id="${item.id}" data-drag-kind="${kind}" data-drag-id="${item.id}" data-guide-target="place-${item.type}"`;
     const stockLabel = stockBase.id === base.id ? "CURRENT BASE" : `STOCK // ${stockBase.name}`;
     const sellButton = canSellEquipment(kind, item) ? `<button class="stock-sell-button" data-sell-stock-kind="${item.kind}" data-sell-stock-id="${item.id}">売却</button>` : "";
     return `<div class="placement-stock-row">
@@ -6573,7 +6902,7 @@ const unplaced = sharedStockItems();
   document.getElementById("seed-selector").innerHTML = Object.entries(CROPS).filter(([, crop]) =>
     state.marketUnlocked[crop.unlock]
   ).map(([cropId, crop]) => `
-    <button class="seed-option ${selectedSeed === cropId ? "active" : ""}" data-seed="${cropId}" data-drag-crop="${cropId}" ${state.seeds[cropId] <= 0 ? "disabled" : ""} style="--crop-color:${crop.color}">
+    <button class="seed-option ${selectedSeed === cropId ? "active" : ""}" data-seed="${cropId}" data-drag-crop="${cropId}" data-guide-target="seed-${cropId}" ${state.seeds[cropId] <= 0 ? "disabled" : ""} style="--crop-color:${crop.color}">
       <span class="seed-glyph"><img src="${crop.icon}" alt=""></span>
       <span><strong>${crop.name}</strong><small>成長 ${crop.days}日</small></span>
       <b>x${state.seeds[cropId]}</b>
@@ -6594,6 +6923,7 @@ const unplaced = sharedStockItems();
   const continuousCountEl = document.getElementById("continuous-count");
   if (continuousCountEl) continuousCountEl.textContent = `${allShelves().filter((unit) => GROW_UNITS[unit.type]?.continuous).length} UNIT`;
   document.getElementById("farm-summary").innerHTML = `<span>生育中</span><strong>${growing}</strong><span>収穫可能</span><strong>${ready}</strong>${dead ? `<span>枯死</span><strong class="danger-text">${dead}</strong>` : ""}`;
+  applyUiGuide();
 }
 
 function renderSlot(plant, shelfIndex, slotIndex) {
@@ -6759,9 +7089,10 @@ function renderInventory() {
         <span>${qty}</span>
         <button data-qty-id="${batch.id}" data-delta="1">+</button>
       </div>
-      <button class="sell-button" data-sell-id="${batch.id}" ${accepted ? "" : "disabled"}>${accepted ? `C${formatNumber(unitPrice * qty)} SELL` : "NOT ACCEPTED"}</button>
+      <button class="sell-button" data-sell-id="${batch.id}" data-guide-target="sell-${batch.crop}" ${accepted ? "" : "disabled"}>${accepted ? `C${formatNumber(unitPrice * qty)} SELL` : "NOT ACCEPTED"}</button>
     </div>`;
   }).join("");
+  applyUiGuide();
 }
 
 function shopCategoryCount(category) {
@@ -6828,7 +7159,7 @@ function renderSeedShopCard(cropId, crop) {
       <p>${available ? crop.note : unlockHint("seed_item", cropId, crop.note)}<br>${crop.packSize}粒パック / 成長 ${crop.days}日<br>${cropResourcePreview(crop)}</p>
       <footer>
         <span class="shop-price">₡${crop.seedPrice}</span>
-        <button class="buy-button" data-buy-seed="${cropId}" ${!available || state.money < crop.seedPrice ? "disabled" : ""}>${available ? `購入 +${crop.packSize}` : "LOCKED"}</button>
+        <button class="buy-button" data-buy-seed="${cropId}" data-guide-target="buy-seed-${cropId}" ${!available || state.money < crop.seedPrice ? "disabled" : ""}>${available ? `購入 +${crop.packSize}` : "LOCKED"}</button>
       </footer>
     </article>`;
 }
@@ -6860,7 +7191,7 @@ function renderEquipmentShopCard(itemId, item) {
       ${tagMarkup(tags, EQUIPMENT_TAGS)}
       <footer>
         <span class="shop-price">₡${price}</span>
-        <button class="buy-button" data-buy-item="${itemId}" ${disabled ? "disabled" : ""}>${!available ? "LOCKED" : owned ? "OWNED" : "BUY"}</button>
+        <button class="buy-button" data-buy-item="${itemId}" data-guide-target="buy-item-${itemId}" ${disabled ? "disabled" : ""}>${!available ? "LOCKED" : owned ? "OWNED" : "BUY"}</button>
       </footer>
     </article>`;
 }
@@ -6982,6 +7313,115 @@ function renderRadio() {
   `).join("");
 }
 
+function infoBookEntries(bookId) {
+  return INFO_ENTRIES.filter((entry) => entry.bookId === bookId).sort((a, b) => a.order - b.order);
+}
+
+function infoBookList() {
+  return Object.entries(INFO_BOOKS)
+    .filter(([, book]) => book.unlocked)
+    .sort(([, a], [, b]) => a.order - b.order);
+}
+
+function ensureInfoSelection() {
+  const books = infoBookList();
+  if (!books.length) return { books, bookId: "", book: null, entries: [], entry: null };
+  if (!INFO_BOOKS[selectedInfoBookId]?.unlocked) selectedInfoBookId = books[0][0];
+  const book = INFO_BOOKS[selectedInfoBookId];
+  const entries = infoBookEntries(selectedInfoBookId);
+  if (!entries.some((entry) => entry.id === selectedInfoEntryId)) {
+    selectedInfoEntryId = book.defaultEntryId && entries.some((entry) => entry.id === book.defaultEntryId)
+      ? book.defaultEntryId
+      : entries[0]?.id || "";
+  }
+  const entry = entries.find((item) => item.id === selectedInfoEntryId) || null;
+  return { books, bookId: selectedInfoBookId, book, entries, entry };
+}
+
+function infoEntryThumbnail(entry, book) {
+  if (entry?.thumbnail) return entry.thumbnail;
+  if (entry?.cropId && CROPS[entry.cropId]?.icon) return CROPS[entry.cropId].icon;
+  return book?.thumbnail || "assets/icons/locked.webp";
+}
+
+function infoCropStatsMarkup(cropId) {
+  const crop = CROPS[cropId];
+  if (!crop) return "";
+  const market = MARKETS[crop.unlock]?.name || crop.unlock || "-";
+  return `<div class="info-stat-grid">
+    <div><span>成長</span><strong>${escapeHtml(crop.days)}日</strong></div>
+    <div><span>種価格</span><strong>₡${formatNumber(crop.seedPrice)}</strong></div>
+    <div><span>1パック</span><strong>${escapeHtml(crop.packSize)}粒</strong></div>
+    <div><span>基礎価格</span><strong>₡${formatNumber(crop.basePrice)}</strong></div>
+    <div><span>水</span><strong>${escapeHtml(crop.water)}/日</strong></div>
+    <div><span>養液</span><strong>${escapeHtml(crop.nutrient)}/日</strong></div>
+    <div><span>主販路</span><strong>${escapeHtml(market)}</strong></div>
+    <div><span>分類</span><strong>${escapeHtml(crop.category || "-")}</strong></div>
+  </div>`;
+}
+
+function renderInfo() {
+  const summary = document.getElementById("info-summary");
+  const bookList = document.getElementById("info-book-list");
+  const entryList = document.getElementById("info-entry-list");
+  const detail = document.getElementById("info-detail");
+  if (!summary || !bookList || !entryList || !detail) return;
+
+  const { books, bookId, book, entries, entry } = ensureInfoSelection();
+  summary.innerHTML = `<span>${books.length} BOOKS / ${entries.length} ENTRIES</span><strong>${escapeHtml(book?.title || "NO DATA")}</strong>`;
+  if (!books.length) {
+    bookList.innerHTML = `<div class="inventory-empty">INFO DATA NOT FOUND</div>`;
+    entryList.innerHTML = "";
+    detail.innerHTML = "";
+    return;
+  }
+
+  bookList.innerHTML = books.map(([id, item]) => `
+    <button class="info-book-card ${id === bookId ? "active" : ""}" data-info-book="${escapeHtml(id)}" type="button">
+      ${optionalImageMarkup(item.thumbnail, item.title, "info-book-thumb")}
+      <span>${escapeHtml(item.kicker || "ARCHIVE")}</span>
+      <strong>${escapeHtml(item.title || id)}</strong>
+      <p>${escapeHtml(item.description || "")}</p>
+    </button>
+  `).join("");
+
+  entryList.innerHTML = entries.map((item) => {
+    const crop = item.cropId ? CROPS[item.cropId] : null;
+    const color = crop?.color || "#72ffb8";
+    return `<button class="info-entry-card ${item.id === selectedInfoEntryId ? "active" : ""}" style="--entry-color:${escapeHtml(color)}" data-info-entry="${escapeHtml(item.id)}" type="button">
+      <img src="${escapeHtml(infoEntryThumbnail(item, book))}" alt="">
+      <span><small>${escapeHtml(item.kicker || item.category || "ENTRY")}</small><strong>${escapeHtml(item.title || item.id)}</strong></span>
+    </button>`;
+  }).join("") || `<div class="inventory-empty">NO ENTRIES</div>`;
+
+  if (!entry) {
+    detail.innerHTML = `<div class="inventory-empty">項目を選択してください</div>`;
+    return;
+  }
+
+  const crop = entry.cropId ? CROPS[entry.cropId] : null;
+  const bookStyle = book?.style === "handwritten" ? " handwritten-reader" : "";
+  const bodyTitle = entry.cropId ? "旧世界の概要" : "記録";
+  const methodMarkup = entry.method ? `<section class="info-reader-section"><h4>水耕栽培の方法</h4>${textBlockMarkup(entry.method)}</section>` : "";
+  const statMarkup = entry.cropId ? `<section class="info-reader-section"><h4>ゲーム内ステータス</h4>${infoCropStatsMarkup(entry.cropId)}</section>` : "";
+  const noteTitle = entry.cropId ? "主人公の書き込み" : "私的メモ";
+  detail.innerHTML = `
+    <article class="info-page${bookStyle}" style="--entry-color:${escapeHtml(crop?.color || "#72ffb8")}">
+      <header class="info-page-header">
+        <div>
+          <p class="eyebrow">${escapeHtml(book?.kicker || "ARCHIVE")} // ${escapeHtml(entry.category || "ENTRY")}</p>
+          <h3>${escapeHtml(entry.title || entry.id)}</h3>
+          <small>${escapeHtml(entry.kicker || "")}</small>
+        </div>
+        <img src="${escapeHtml(infoEntryThumbnail(entry, book))}" alt="">
+      </header>
+      <section class="info-reader-section"><h4>${bodyTitle}</h4>${textBlockMarkup(entry.body)}</section>
+      ${methodMarkup}
+      ${statMarkup}
+      ${entry.protagonistNote ? `<section class="info-hand-note"><h4>${noteTitle}</h4>${textBlockMarkup(entry.protagonistNote)}</section>` : ""}
+    </article>
+  `;
+}
 function render() {
   const cleaningNeeded = ownedBases().some((base) => [...base.shelves, ...base.floorDevices].some(needsCleaning));
   document.querySelector('[data-tab="farm"]')?.classList.toggle("needs-cleaning-tab", cleaningNeeded);
@@ -6993,6 +7433,7 @@ function render() {
   document.querySelector('[data-tab="schedule"]')?.toggleAttribute("disabled", !state.shopUnlocked);
   document.querySelector('[data-tab="broker"]')?.classList.toggle("locked", !state.brokerUnlocked);
   document.querySelector('[data-tab="broker"]')?.toggleAttribute("disabled", !state.brokerUnlocked);
+  updateTabIndicators();
   renderHeader();
   renderFarm();
   renderMarkets();
@@ -7000,14 +7441,15 @@ function render() {
   renderShop();
   renderBroker();
   renderRadio();
+  renderInfo();
   renderTimeControl();
   syncLoopAudio();
+  applyUiGuide();
 }
 
 function renderRuntime() {
-  const cleaningNeeded = ownedBases().some((base) => [...base.shelves, ...base.floorDevices].some(needsCleaning));
-  document.querySelector('[data-tab="farm"]')?.classList.toggle("needs-cleaning-tab", cleaningNeeded);
-  renderHeader();
+  updateTabIndicators();
+renderHeader();
   if (farmRenderRequested) {
     farmRenderRequested = false;
     renderFarm();
@@ -7016,8 +7458,10 @@ function renderRuntime() {
   }
   if (document.getElementById("schedule-screen")?.classList.contains("active")) renderSchedule();
   if (document.getElementById("radio-screen")?.classList.contains("active")) renderRadio();
+  if (document.getElementById("info-screen")?.classList.contains("active")) renderInfo();
   renderTimeControl();
   syncLoopAudio();
+  applyUiGuide();
 }
 
 function updateFarmProgress() {
@@ -7035,11 +7479,12 @@ function updateFarmProgress() {
 
 function renderTimeControl() {
   const button = document.getElementById("end-day-button");
-  button.disabled = state.ended;
-  button.classList.toggle("paused", state.paused || !state.timeUnlocked);
-  document.getElementById("time-control-label").textContent = state.ended ? "OPERATION CLOSED" : !state.timeUnlocked ? "TUTORIAL DAY LOCK" : state.paused ? "REALTIME PAUSED" : "REALTIME RUNNING";
-  document.getElementById("time-control-text").textContent = state.ended ? "Game ended" : !state.timeUnlocked ? "DAY停止中" : state.paused ? "Resume" : "Pause";
-  document.getElementById("time-control-icon").textContent = state.ended ? "■" : !state.timeUnlocked ? "LOCK" : state.paused ? "▶" : "Ⅱ";
+  const commsPaused = isCommsBlocking();
+  button.disabled = state.ended || commsPaused;
+  button.classList.toggle("paused", state.paused || !state.timeUnlocked || commsPaused);
+  document.getElementById("time-control-label").textContent = state.ended ? "OPERATION CLOSED" : commsPaused ? "COMMS PAUSED" : !state.timeUnlocked ? "TUTORIAL DAY LOCK" : state.paused ? "REALTIME PAUSED" : "REALTIME RUNNING";
+  document.getElementById("time-control-text").textContent = state.ended ? "Game ended" : commsPaused ? "通信中" : !state.timeUnlocked ? "DAY停止中" : state.paused ? "Resume" : "Pause";
+  document.getElementById("time-control-icon").textContent = state.ended ? "■" : commsPaused ? "LOCK" : !state.timeUnlocked ? "LOCK" : state.paused ? "▶" : "Ⅱ";
 }
 
 function bindEvents() {
@@ -7134,6 +7579,27 @@ function bindEvents() {
     if (radioProgram) {
       event.preventDefault();
       selectRadioProgram(radioProgram.dataset.radioProgram);
+      return;
+    }
+
+    const infoBook = event.target.closest("[data-info-book]");
+    if (infoBook) {
+      event.preventDefault();
+      selectedInfoBookId = infoBook.dataset.infoBook;
+      selectedInfoEntryId = "";
+      playSound("tab_switch", 0.1);
+      hapticFeedback(5);
+      renderInfo();
+      return;
+    }
+
+    const infoEntry = event.target.closest("[data-info-entry]");
+    if (infoEntry) {
+      event.preventDefault();
+      selectedInfoEntryId = infoEntry.dataset.infoEntry;
+      playSound("ui_click", 0.12);
+      hapticFeedback(4);
+      renderInfo();
       return;
     }
 
@@ -7319,6 +7785,7 @@ function bindEvents() {
   });
 
   document.addEventListener("pointerdown", (event) => {
+    if (cleanToolDrag) clearCleanToolDrag();
     if (isCommsInteractionTarget(event.target)) return;
     if (isCommsBlocking() && !isCommsInteractionTarget(event.target)) {
       event.preventDefault();
@@ -7661,6 +8128,10 @@ function bindEvents() {
   });
 
   document.addEventListener("pointercancel", clearDragState);
+  window.addEventListener("blur", clearDragState);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearDragState();
+  });
   document.addEventListener("dragstart", (event) => {
     if (event.target.closest("[data-drag-kind], [data-drag-crop]")) event.preventDefault();
   });
@@ -7668,6 +8139,7 @@ function bindEvents() {
   document.getElementById("end-day-button").addEventListener("click", togglePause);
   document.getElementById("refresh-properties").addEventListener("click", refreshPropertyListings);
   document.getElementById("reset-button").addEventListener("click", requestExitToStart);
+  document.getElementById("fullscreen-button")?.addEventListener("click", toggleFullscreenMode);
   document.getElementById("modal-reset").addEventListener("click", requestNewGame);
   document.getElementById("start-continue").addEventListener("click", handleStartPrimary);
   document.getElementById("start-day30")?.addEventListener("click", requestSelectedModeGame);
@@ -7682,6 +8154,11 @@ function bindEvents() {
   document.getElementById("modal-close").addEventListener("click", () => {
     document.getElementById("modal-backdrop").classList.add("hidden");
   });
+  window.addEventListener("resize", applyUiScale);
+  window.visualViewport?.addEventListener("resize", applyUiScale);
+  document.addEventListener("fullscreenchange", () => { updateFullscreenButton(); applyUiScale(); });
+  document.addEventListener("webkitfullscreenchange", () => { updateFullscreenButton(); applyUiScale(); });
+  document.addEventListener("msfullscreenchange", () => { updateFullscreenButton(); applyUiScale(); });
 
   document.addEventListener("keydown", (event) => {
     if (isCommsBlocking()) {
@@ -7709,14 +8186,22 @@ function bindEvents() {
     if (event.key === "4") switchTab("schedule");
     if (event.key === "5") switchTab("broker");
     if (event.key === "6") switchTab("radio");
+    if (event.key === "7") switchTab("info");
   });
 }
 
 function clearDragState() {
+  if (cleanToolDrag) clearCleanToolDrag();
   dragPayload = null;
   pendingSeedDrag = null;
+  harvestHold = null;
+  harvestSwipe = null;
   if (pointerDrag && pointerDrag.ghost) pointerDrag.ghost.remove();
   pointerDrag = null;
+  if (facilityPan) {
+    document.querySelector(".facility-grid-shell")?.classList.remove("panning");
+    facilityPan = null;
+  }
   document.body.classList.remove("drag-active", "equipment-drag-active");
   document.querySelectorAll(".dragging, .drop-target, .drop-footprint, .seed-drop-target, .moving-coverage").forEach(clearMovingCoverageClasses);
 }
@@ -7727,8 +8212,12 @@ async function bootstrap() {
   await preloadBootAssets();
   startModeView = validPlayMode(safeStorageGet(START_MODE_PREF_KEY), "day30");
   loadGame();
+  applyUiScale();
   bindEvents();
+  updateFullscreenButton();
+  markTabOpened("farm");
   render();
+  pushLogEntry(state.log, "status", { duration: 5200 });
   openStartScreen({ persist: false });
   hideBootLoading();
   window.setInterval(realtimeTick, 200);
