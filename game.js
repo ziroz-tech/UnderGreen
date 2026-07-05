@@ -233,7 +233,7 @@ function applyUiGuide() {
   removeUiGuideHighlights();
   const guide = ensureUiGuideState();
   if (!guide) return;
-  if (startScreenOpen || !document.getElementById("start-screen")?.classList.contains("hidden")) return;
+  if (startScreenOpen || !document.getElementById("start-screen")?.classList.contains("hidden") || dragPayload || pointerDrag || document.body?.classList.contains("drag-active")) return;
   const matches = uiGuideSelectors(guide.target).flatMap((selector) => Array.from(document.querySelectorAll(selector)));
   const visibleMatches = matches.filter(isVisibleGuideTarget);
   const targets = visibleMatches.length ? visibleMatches.slice(0, 3) : matches.slice(0, 1);
@@ -1776,14 +1776,16 @@ function playModeConfig(mode = "day30") {
 
 function playModeLimit(mode = state?.mode) {
   const config = PLAY_MODES[mode];
-  if (!config) return Number.POSITIVE_INFINITY;
-  const limit = config.limit;
-  return Number.isFinite(Number(limit)) ? Number(limit) : Number.POSITIVE_INFINITY;
+  if (!config || config.limit === null || config.limit === undefined || config.limit === "") return Number.POSITIVE_INFINITY;
+  const limit = Number(config.limit);
+  return Number.isFinite(limit) && limit > 0 ? limit : Number.POSITIVE_INFINITY;
 }
 
 function isTimedPlayMode(mode = state?.mode) {
   const config = PLAY_MODES[mode];
-  return Boolean(config && Number.isFinite(Number(config.limit)));
+  if (!config || config.limit === null || config.limit === undefined || config.limit === "") return false;
+  const limit = Number(config.limit);
+  return Number.isFinite(limit) && limit > 0;
 }
 
 function playModeLabel(mode = state?.mode) {
@@ -3387,8 +3389,9 @@ function terminalSurfaceFeedback(tabId) {
   window.setTimeout(() => screen.classList.remove("terminal-flash"), 420);
 }
 
-function rejectFeedback() {
+function rejectFeedback(options = {}) {
   playSound("feedback_reject", 0.18);
+  if (options.shake === false) return;
   pulseElement(document.getElementById("app"), "micro-shake");
 }
 
@@ -4201,6 +4204,12 @@ function beginEquipmentMenuHold(element, event) {
 
 function beginPointerDrag(source, event, payload, startX = event.clientX, startY = event.clientY) {
   dragPayload = payload;
+  source?.classList.remove("guide-pulse");
+  source?.removeAttribute("data-guide-active");
+  source?.querySelectorAll?.(".guide-pulse, [data-guide-active]").forEach((element) => {
+    element.classList.remove("guide-pulse");
+    element.removeAttribute("data-guide-active");
+  });
   event.preventDefault();
   let anchor = { x: 0, y: 0 };
   if (dragPayload.type === "equipment") {
@@ -5834,7 +5843,7 @@ function processDayBoundary() {
   state.day += 1;
   const modeLimit = playModeLimit(state.mode);
   const debugMode = Boolean(state.debugMode);
-  if (!debugMode && Number.isFinite(modeLimit) && state.day > modeLimit) {
+  if (!debugMode && isTimedPlayMode(state.mode) && state.day > modeLimit) {
     finalizeDay30Run({ completed: true, playedDays: modeLimit, mode: state.mode });
     return;
   }
@@ -8003,6 +8012,11 @@ function bindEvents() {
       if (dragPayload.type === "equipment") document.body.classList.add("equipment-drag-active");
       pointerDrag.ghost = pointerDrag.source.cloneNode(true);
       pointerDrag.ghost.className = "drag-ghost";
+      pointerDrag.ghost.removeAttribute("data-guide-active");
+      pointerDrag.ghost.querySelectorAll?.(".guide-pulse, [data-guide-active]").forEach((element) => {
+        element.classList.remove("guide-pulse");
+        element.removeAttribute("data-guide-active");
+      });
       document.body.appendChild(pointerDrag.ghost);
     }
     event.preventDefault();
@@ -8113,7 +8127,7 @@ function bindEvents() {
     } else if (validEquipmentDrop) {
       placeItemAt(payload.kind, payload.id, equipmentOrigin.x, equipmentOrigin.y, cell, { selectAfterPlace: false });
     } else {
-      rejectFeedback();
+      rejectFeedback(payload.type === "seed" ? { shake: false } : {});
     }
   });
 
@@ -8241,6 +8255,7 @@ function clearDragState() {
   }
   document.body.classList.remove("drag-active", "equipment-drag-active");
   document.querySelectorAll(".dragging, .drop-target, .drop-footprint, .seed-drop-target, .moving-coverage").forEach(clearMovingCoverageClasses);
+  window.requestAnimationFrame(applyUiGuide);
 }
 
 async function bootstrap() {

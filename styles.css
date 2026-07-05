@@ -6679,3 +6679,46 @@ body.start-screen-open {
   mix-blend-mode: color-dodge;
   opacity: 0.78;
 }
+/* Keep tutorial highlights from creating scrollbars while dragging. */
+body.drag-active {
+  overflow: hidden;
+}
+
+body.drag-active .guide-pulse {
+  outline: 0 !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+.drag-ghost.guide-pulse,
+.drag-ghost .guide-pulse {
+  outline: 0 !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+/* Keep seed tutorial highlight inside the seed card so it is not clipped by the vault scroller. */
+.seed-option.guide-pulse {
+  outline: 2px solid rgba(245, 214, 91, .9) !important;
+  outline-offset: -2px;
+  box-shadow:
+    inset 0 0 0 1px rgba(245, 214, 91, .42),
+    0 0 18px rgba(245, 214, 91, .3) !important;
+  animation: guide-card-pulse 1.05s ease-in-out infinite;
+}
+
+@keyframes guide-card-pulse {
+  0%, 100% {
+    outline-color: rgba(245, 214, 91, .76);
+    box-shadow:
+      inset 0 0 0 1px rgba(245, 214, 91, .38),
+      0 0 12px rgba(245, 214, 91, .2) !important;
+    filter: brightness(1);
+  }
+  50% {
+    outline-color: #fff2a8;
+    box-shadow:
+      inset 0 0 0 2px rgba(245, 214, 91, .64),
+      0 0 22px rgba(245, 214, 91, .48) !important;
+    filter: brightness(1.12);
+  }
+}
