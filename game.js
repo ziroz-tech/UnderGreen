@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 let CROPS = {};
 let MARKETS = {};
@@ -186,6 +186,7 @@ let pendingDay30RecordId = null;
 let startModeView = "day30";
 let startTitleTapCount = 0;
 let startTitleTapAt = 0;
+let startLaunchPending = false;
 const COMMS_DEDUPE_TRIGGERS = new Set(["plant_resource_shortage", "resource_low"]);
 const GAME_TABS = ["farm", "market", "shop", "schedule", "broker", "radio", "info"];
 let currentUiScale = 1;
@@ -232,6 +233,7 @@ function applyUiGuide() {
   removeUiGuideHighlights();
   const guide = ensureUiGuideState();
   if (!guide) return;
+  if (startScreenOpen || !document.getElementById("start-screen")?.classList.contains("hidden")) return;
   const matches = uiGuideSelectors(guide.target).flatMap((selector) => Array.from(document.querySelectorAll(selector)));
   const visibleMatches = matches.filter(isVisibleGuideTarget);
   const targets = visibleMatches.length ? visibleMatches.slice(0, 3) : matches.slice(0, 1);
@@ -6159,9 +6161,25 @@ function startSelectedModeGame() {
   else startNewGame(startModeView);
 }
 
+function runStartLaunchFeedback(action) {
+  if (startLaunchPending) return;
+  startLaunchPending = true;
+  const screen = document.getElementById("start-screen");
+  screen?.classList.add("start-activating");
+  playSoundFirst(["unlock_notice", "tab_switch", "start_mode_toggle"], 0.22);
+  hapticFeedback([14, 28, 14]);
+  window.setTimeout(() => {
+    startLaunchPending = false;
+    screen?.classList.remove("start-activating");
+    action?.();
+  }, 320);
+}
+
 function handleStartPrimary() {
-  if (hasStartProgress()) closeStartScreen();
-  else startSelectedModeGame();
+  runStartLaunchFeedback(() => {
+    if (hasStartProgress()) closeStartScreen();
+    else startSelectedModeGame();
+  });
 }
 
 function unlockDebugState() {
@@ -6204,6 +6222,7 @@ function startDebugGame() {
   startScreenOpen = false;
   lastTickAt = Date.now();
   document.getElementById("start-screen")?.classList.add("hidden");
+  document.body.classList.remove("start-screen-open");
   document.getElementById("start-screen")?.setAttribute("aria-hidden", "true");
   document.getElementById("modal-backdrop")?.classList.add("hidden");
   document.getElementById("comms-banner")?.classList.add("hidden");
@@ -6229,6 +6248,7 @@ function startNewGame(mode = "normal") {
   startScreenOpen = false;
   lastTickAt = Date.now();
   document.getElementById("start-screen")?.classList.add("hidden");
+  document.body.classList.remove("start-screen-open");
   document.getElementById("modal-backdrop").classList.add("hidden");
   document.getElementById("comms-banner")?.classList.add("hidden");
   document.getElementById("modal-close").hidden = false;
@@ -6268,18 +6288,21 @@ function toggleStartModeView() {
 
 function openStartScreen(options = {}) {
   const { persist = true } = options;
+  document.body.classList.add("start-screen-open");
   startScreenOpen = true;
   pausedBeforeStartScreen = Boolean(state.paused);
   state.paused = true;
   clearDragState();
   clearEquipmentMenu();
   clearCleanToolDrag();
+  removeUiGuideHighlights();
   document.getElementById("modal-backdrop")?.classList.add("hidden");
   document.getElementById("comms-banner")?.classList.add("hidden");
   document.getElementById("news-history-panel")?.classList.add("hidden");
   updateStartScreen();
   const screen = document.getElementById("start-screen");
   if (screen) {
+    screen.classList.remove("start-activating");
     screen.classList.remove("hidden");
     screen.setAttribute("aria-hidden", "false");
   }
@@ -6292,6 +6315,7 @@ function openStartScreen(options = {}) {
 
 function closeStartScreen() {
   startScreenOpen = false;
+  document.body.classList.remove("start-screen-open");
   state.paused = pausedBeforeStartScreen;
   const screen = document.getElementById("start-screen");
   if (screen) {
@@ -6300,6 +6324,7 @@ function closeStartScreen() {
   }
   lastTickAt = Date.now();
   render();
+  window.requestAnimationFrame(applyUiGuide);
   if (isFreshOperationState()) clearCommsForTrigger("game_start");
   if (isFreshOperationState() || activeComms) triggerComms("game_start");
 }
@@ -6308,6 +6333,7 @@ function updateStartScreen() {
   const status = document.getElementById("start-status");
   const continueButton = document.getElementById("start-continue");
   const modeButton = document.getElementById("start-day30");
+  const modeLabel = document.getElementById("start-mode-label");
   const recordsTitle = document.getElementById("start-records-title");
   if (!status || !continueButton) return;
   const hasProgress = hasStartProgress();
@@ -6319,6 +6345,10 @@ function updateStartScreen() {
     modeButton.textContent = selectedConfig.label;
     modeButton.classList.toggle("free-mode", startModeView === "free");
     modeButton.classList.toggle("day60-mode", startModeView === "day60");
+  }
+  if (modeLabel) {
+    modeLabel.textContent = `${selectedConfig.shortLabel} MODE`;
+    modeLabel.dataset.mode = startModeView;
   }
   if (newButton) {
     newButton.hidden = !hasProgress;
@@ -6600,6 +6630,7 @@ function day30ResultToStart() {
 function enterDay30ViewMode() {
   applyDay30PlayerName();
   startScreenOpen = false;
+  document.body.classList.remove("start-screen-open");
   state.ended = true;
   state.paused = true;
   document.getElementById("modal-backdrop").classList.add("hidden");
