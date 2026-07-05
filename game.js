@@ -6177,8 +6177,14 @@ function runStartLaunchFeedback(action) {
 
 function handleStartPrimary() {
   runStartLaunchFeedback(() => {
-    if (hasStartProgress()) closeStartScreen();
+    if (hasStartProgress()) requestSelectedModeGame();
     else startSelectedModeGame();
+  });
+}
+
+function handleStartContinue() {
+  runStartLaunchFeedback(() => {
+    if (hasStartProgress()) closeStartScreen();
   });
 }
 
@@ -6339,7 +6345,7 @@ function updateStartScreen() {
   const hasProgress = hasStartProgress();
   const selectedConfig = playModeConfig(startModeView);
   const newButton = document.getElementById("start-new");
-  continueButton.textContent = hasProgress ? "続きから" : `${selectedConfig.label}開始`;
+  continueButton.textContent = `${selectedConfig.label}で新規開始`;
   if (modeButton) {
     modeButton.hidden = true;
     modeButton.textContent = selectedConfig.label;
@@ -6352,7 +6358,7 @@ function updateStartScreen() {
   }
   if (newButton) {
     newButton.hidden = !hasProgress;
-    newButton.textContent = `${selectedConfig.label}で新規開始`;
+    newButton.textContent = "続きから開始";
   }
   if (recordsTitle) recordsTitle.textContent = selectedConfig.recordsTitle;
   status.textContent = hasProgress
@@ -8174,7 +8180,7 @@ function bindEvents() {
   document.getElementById("modal-reset").addEventListener("click", requestNewGame);
   document.getElementById("start-continue").addEventListener("click", handleStartPrimary);
   document.getElementById("start-day30")?.addEventListener("click", requestSelectedModeGame);
-  document.getElementById("start-new").addEventListener("click", requestSelectedModeGame);
+  document.getElementById("start-new").addEventListener("click", handleStartContinue);
   document.getElementById("start-mode-toggle").addEventListener("click", toggleStartModeView);
   document.getElementById("start-title")?.addEventListener("click", handleStartTitleTap);
   document.getElementById("record-export-button").addEventListener("click", requestRecordExport);
