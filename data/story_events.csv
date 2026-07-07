@@ -1,0 +1,2 @@
+id,trigger,layout,kicker,title,background,choices,once,priority,blocking,requirements,context,sound,soundVolume,effects
+episode0_first_illegal_procurement,game_start,duel,,,assets/storyboard/steam_pv/shot07_comms_choice.png,ok=LINK CLOSE,TRUE,200,TRUE,,,comms_open,0.18,choice:*->comms:game_start

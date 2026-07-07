@@ -1,0 +1,5 @@
+eventId,speakerId,side,slot,name,role,icon
+episode0_first_illegal_procurement,narrator,system,0,？？,,
+episode0_first_illegal_procurement,mara,left,0,マーラ,種ブローカー,assets/characters/seed-broker.png
+episode0_first_illegal_procurement,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
+episode0_first_illegal_procurement,support_robot,right,1,？？,サポートロボット,assets/characters/supportRobot-iso-leftdown.png
