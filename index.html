@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=156">
+    <link rel="stylesheet" href="styles.css?v=166">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -306,6 +306,40 @@
     </section>
   </div>
 
+  <section class="story-comms-overlay hidden" id="story-comms-overlay" aria-hidden="true" aria-live="polite">
+    <div class="story-comms-bg" id="story-comms-bg"></div>
+    <div class="story-comms-noise" aria-hidden="true"></div>
+    <div class="story-comms-grid" aria-hidden="true"></div>
+    <div class="story-comms-sweep" aria-hidden="true"></div>
+    <div class="story-comms-window" role="dialog" aria-modal="true" aria-labelledby="story-comms-title">
+      <button class="story-comms-close" id="story-comms-close" type="button" aria-label="ストーリー通信を閉じる">×</button>
+      <div class="story-comms-alert" aria-hidden="true">!</div>
+      <div class="story-side-stack story-side-left" id="story-left-stack" aria-label="左側の話者"></div>
+      <div class="story-transcript">
+        <p class="story-kicker" id="story-kicker">STORY COMMS</p>
+        <h2 id="story-comms-title">---</h2>
+        <div class="story-history" id="story-history" aria-label="会話履歴"></div>
+        <div class="story-current-speaker" id="story-current-speaker">
+          <small id="story-current-role">---</small>
+          <strong id="story-current-name">---</strong>
+        </div>
+        <p class="story-text" id="story-text"></p>
+        <div class="story-progress" id="story-progress"></div>
+        <div class="story-actions" id="story-actions"></div>
+      </div>
+      <div class="story-side-stack story-side-right" id="story-right-stack" aria-label="右側の話者"></div>
+      <div class="story-comms-status" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+    <div class="story-image-popup hidden" id="story-image-popup" aria-hidden="true">
+      <section class="story-image-window" role="dialog" aria-modal="true" aria-label="story image packet">
+        <div class="story-image-head"><span>IMAGE PACKET</span><strong>VISUAL DATA</strong></div>
+        <div class="story-image-frame"><img id="story-image-popup-img" src="" alt=""></div>
+        <p id="story-image-popup-caption"></p>
+        <button class="story-link-button story-image-close" type="button" data-story-image-close><span>NEXT</span><i></i></button>
+      </section>
+    </div>
+  </section>
+
   <aside class="comms-banner hidden" id="comms-banner" aria-live="polite">
     <div class="comms-speaker">
       <img id="comms-icon" src="assets/characters/seed-broker.png" alt="">
@@ -363,6 +397,6 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=176"></script>
+  <script src="game.js?v=187"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 let CROPS = {};
 let MARKETS = {};
@@ -175,8 +175,13 @@ let lastRenderAt = 0;
 let lastAutosaveAt = 0;
 let UI_TEXT = {};
 let COMM_EVENTS = [];
+let STORY_EVENTS = [];
+let STORY_EVENT_SPEAKERS = {};
+let STORY_EVENT_LINES = {};
 let activeComms = null;
 let pendingComms = [];
+let activeStory = null;
+let pendingStories = [];
 let startScreenOpen = true;
 let pendingConfirmAction = null;
 let pendingDangerAction = null;
@@ -449,6 +454,74 @@ function parseCommsEffect(entry) {
 
 function toCommsEffects(value) {
   return toList(value).map(parseCommsEffect).filter(Boolean);
+}
+
+function normalizeStorySide(value) {
+  const side = String(value || "").trim().toLowerCase();
+  if (side === "right" || side === "r") return "right";
+  if (side === "system" || side === "none" || side === "narrator" || side === "center") return "system";
+  return "left";
+}
+
+function storySpeakerGroups(rows) {
+  return rows.reduce((groups, row, index) => {
+    const eventId = row.eventId;
+    const speakerId = row.speakerId;
+    if (!eventId || !speakerId) return groups;
+    groups[eventId] ||= {};
+    groups[eventId][speakerId] = {
+      id: speakerId,
+      side: normalizeStorySide(row.side),
+      slot: toNumber(row.slot || row.order, index),
+      name: row.name || speakerId,
+      role: row.role || "",
+      icon: row.icon || ""
+    };
+    return groups;
+  }, {});
+}
+
+function normalizeStoryDirectiveText(value) {
+  let raw = String(value || "").trim();
+  for (let index = 0; index < 2; index += 1) {
+    const first = raw[0];
+    const last = raw[raw.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'") || (first === "?" && last === "?")) {
+      raw = raw.slice(1, -1).trim();
+    }
+  }
+  return raw;
+}
+
+function parseStoryLineText(value) {
+  const raw = normalizeStoryDirectiveText(value);
+  const imageMatch = raw.match(/^\[\[image\s*:\s*([^|\]]+)(?:\|([^\]]+))?\]\]$/i);
+  if (!imageMatch) return { kind: "text", text: value || "" };
+  const imageUrl = imageMatch[1].trim();
+  const imageSummary = String(imageMatch[2] || imageUrl).trim();
+  return { kind: "image", text: "", imageUrl, imageSummary };
+}
+
+function storyLineGroups(rows) {
+  return rows.reduce((groups, row) => {
+    const eventId = row.eventId;
+    if (!eventId) return groups;
+    groups[eventId] ||= [];
+    groups[eventId].push({
+      speakerId: row.speakerId || "narrator",
+      ...parseStoryLineText(row.text)
+    });
+    return groups;
+  }, {});
+}
+
+function storySpeakerSideLists(speakers = {}) {
+  const bySlot = (a, b) => (a.slot - b.slot) || a.id.localeCompare(b.id);
+  const entries = Object.values(speakers).sort(bySlot);
+  return {
+    left: entries.filter((speaker) => speaker.side === "left").map((speaker) => speaker.id),
+    right: entries.filter((speaker) => speaker.side === "right").map((speaker) => speaker.id)
+  };
 }
 
 function rowsToObject(rows, mapper) {
@@ -761,6 +834,36 @@ async function loadExternalData() {
       effects: toCommsEffects(row.effects)
     })).sort((a, b) => b.priority - a.priority);
   });
+  const storyRows = await loadCsv("data/story_events.csv");
+  STORY_EVENT_SPEAKERS = storySpeakerGroups(await loadCsv("data/story_event_speakers.csv"));
+  STORY_EVENT_LINES = storyLineGroups(await loadCsv("data/story_event_lines.csv"));
+  STORY_EVENTS = storyRows.map((row) => {
+    const speakers = STORY_EVENT_SPEAKERS[row.id] || {};
+    const pages = STORY_EVENT_LINES[row.id] || [];
+    return {
+      id: row.id,
+      trigger: row.trigger,
+      layout: row.layout || "duel",
+      kicker: row.kicker,
+      title: row.title,
+      background: row.background,
+      speakers,
+      speakerSides: storySpeakerSideLists(speakers),
+      pages,
+      choices: toList(row.choices).map((entry) => {
+        const [id, label] = entry.split("=");
+        return { id, label: label || id };
+      }),
+      once: String(row.once || "").trim().toLowerCase() !== "false",
+      blocking: toBool(row.blocking),
+      priority: toNumber(row.priority, 0),
+      requirements: toRequirements(row.requirements),
+      context: toContextMatchers(row.context),
+      sound: row.sound || "",
+      soundVolume: row.soundVolume ? toNumber(row.soundVolume, null) : null,
+      effects: toCommsEffects(row.effects)
+    };
+  }).filter((event) => event.id && event.trigger && event.pages.length).sort((a, b) => b.priority - a.priority);
   await loadRequiredCsv("data/ui_text.csv", applyUiText);
 }
 
@@ -816,6 +919,11 @@ function collectBootImageAssets() {
   Object.values(INFO_BOOKS).forEach((entry) => addAssetUrl(urls, entry.thumbnail));
   INFO_ENTRIES.forEach((entry) => addAssetUrl(urls, entry.thumbnail));
   COMM_EVENTS.forEach((event) => addAssetUrl(urls, event.icon));
+  STORY_EVENTS.forEach((event) => {
+    addAssetUrl(urls, event.background);
+    Object.values(event.speakers || {}).forEach((speaker) => addAssetUrl(urls, speaker.icon));
+    (event.pages || []).forEach((line) => addAssetUrl(urls, line.imageUrl));
+  });
   Object.values(UI_TEXT).forEach((value) => addAssetUrl(urls, value));
   return [...urls];
 }
@@ -995,6 +1103,56 @@ function analyticsElapsedSeconds() {
 
 function analyticsDayFloat() {
   return Number(((Number(state?.day) || 1) + (Number(state?.dayProgress) || 0)).toFixed(2));
+}
+
+function currentInventoryDayFloat() {
+  return Math.max(1, (Number(state?.day) || 1) + (Number(state?.dayProgress) || 0));
+}
+
+function inventoryHarvestTimestamp() {
+  return Number(currentInventoryDayFloat().toFixed(5));
+}
+
+function inventoryDegradeAfterDays() {
+  return state?.equipment?.fridge ? 6 : 3;
+}
+
+function inventoryAgeDays(batch, atDay = currentInventoryDayFloat()) {
+  const harvestedAt = Number(batch?.harvestedAtDay);
+  if (Number.isFinite(harvestedAt)) {
+    return Math.max(0, Math.floor(Number(atDay) - harvestedAt + 0.000001));
+  }
+  return Math.max(0, Math.floor(Number(batch?.age) || 0));
+}
+
+function normalizeInventoryBatch(item, atDay = currentInventoryDayFloat()) {
+  const age = Math.max(0, Math.floor(Number(item.age) || 0));
+  const harvestedAt = Number.isFinite(Number(item.harvestedAtDay))
+    ? Number(item.harvestedAtDay)
+    : Number((Number(atDay) - age).toFixed(5));
+  const batch = {
+    ...item,
+    qty: Math.max(0, Number(item.qty) || 0),
+    harvestedAtDay: harvestedAt
+  };
+  batch.age = inventoryAgeDays(batch, atDay);
+  if (batch.age >= inventoryDegradeAfterDays()) batch.degraded = true;
+  return batch;
+}
+
+function refreshInventoryAges(atDay = currentInventoryDayFloat()) {
+  if (!Array.isArray(state?.inventory)) return;
+  state.inventory.forEach((batch) => {
+    batch.harvestedAtDay = Number.isFinite(Number(batch.harvestedAtDay))
+      ? Number(batch.harvestedAtDay)
+      : Number((Number(atDay) - (Number(batch.age) || 0)).toFixed(5));
+    batch.age = inventoryAgeDays(batch, atDay);
+    if (batch.age >= inventoryDegradeAfterDays()) batch.degraded = true;
+  });
+}
+
+function isInventoryBatchDegraded(batch) {
+  return Boolean(batch?.degraded) || inventoryAgeDays(batch) >= inventoryDegradeAfterDays();
 }
 
 function analyticsStamp(extra = {}) {
@@ -1261,9 +1419,12 @@ function createInitialState(mode = "normal") {
     brokerUnlocked: false,
     commsSeen: {},
     commsChoices: {},
+    storySeen: {},
+    storyChoices: {},
     openedTabs: { farm: true },
     uiGuide: null,
     commsOpen: [],
+    storyOpen: [],
     event: null,
     news: "",
     newsLabel: "",
@@ -1852,11 +2013,9 @@ function repairPlayableState() {
     }
   });
   state.inventory ||= [];
-  state.inventory = state.inventory.map((item) => ({
-    ...item,
-    qty: Math.max(0, Number(item.qty) || 0),
-    age: Math.max(0, Number(item.age) || 0)
-  })).filter((item) => item.qty > 0);
+  state.inventory = state.inventory
+    .map((item) => normalizeInventoryBatch(item))
+    .filter((item) => item.qty > 0);
   state.equipment ||= { tanks: 0, filter: false, fridge: false };
   state.resourceRemainders ||= { water: 0, nutrient: 0 };
   state.water = Number.isFinite(Number(state.water)) ? Number(state.water) : 20;
@@ -1890,6 +2049,9 @@ function loadGame() {
   state.commsSeen ||= {};
   state.commsChoices ||= {};
   state.commsOpen ||= [];
+  state.storySeen ||= {};
+  state.storyChoices ||= {};
+  state.storyOpen ||= [];
   state.unlocks ||= {};
   state.mode ||= "normal";
   state.debugMode = Boolean(state.debugMode);
@@ -1933,6 +2095,7 @@ function loadGame() {
   updateProgressionUnlocks({ silent: true });
   repairPlayableState();
   ensureSupportRobotGrant();
+  restoreStoryState();
   restoreCommsState();
   if (!isMarketAvailable(selectedMarket)) selectedMarket = "lower";
   const hasLegacyImmediateEvent = state.event && !state.marketEventQueue.length;
@@ -2782,7 +2945,7 @@ function baseMarketUnitPrice(batch, marketId = selectedMarket, options = {}) {
     * (options.ignoreDemand ? 1 : scheduleCropEventMultiplier(batch.crop, marketId))
     * cropEventMultiplier(batch.crop);
 
-  if (batch.degraded) price *= 0.5;
+  if (isInventoryBatchDegraded(batch)) price *= 0.5;
   if (marketId === "upper" && batch.quality === "C") price *= 0.65;
   if (state.event && state.event.fee) price *= (1 - state.event.fee);
   return price;
@@ -3554,8 +3717,316 @@ function hasMatchingQueuedComms(event, context = {}) {
   return [activeComms, ...pendingComms].some((entry) => commsDedupeKey(entry) === key);
 }
 
-function triggerComms(trigger, context = {}) {
+
+function storyEventMatches(entry, trigger, context = {}) {
+  return entry.trigger === trigger
+    && (!entry.once || !state.storySeen?.[entry.id])
+    && requirementsMet(entry.requirements || [])
+    && commsContextMatches(entry.context || [], context);
+}
+
+function storyEntryStillValid(entry) {
+  return requirementsMet(entry?.event?.requirements || [])
+    && commsContextMatches(entry?.event?.context || [], entry?.context || {});
+}
+
+function hasQueuedStory(event) {
+  return [activeStory, ...pendingStories].some((entry) => entry?.event?.id === event?.id);
+}
+
+function triggerStoryEvent(trigger, context = {}) {
+  if (!state || state.ended) return false;
+  const events = STORY_EVENTS
+    .filter((entry) => storyEventMatches(entry, trigger, context))
+    .filter((event) => !hasQueuedStory(event));
+  if (!events.length) {
+    if (activeStory) renderStoryComms();
+    return false;
+  }
+  const nextEvents = events.map((event) => {
+    state.storySeen[event.id] = Date.now();
+    return { event, page: 0, context };
+  });
+  if (activeStory) pendingStories.push(...nextEvents);
+  else activeStory = nextEvents.shift();
+  pendingStories.push(...nextEvents);
+  persistStoryState();
+  renderStoryComms();
+  playCommsSound(activeStory, "comms_open");
+  saveGame();
+  return true;
+}
+
+function serializeStoryEntry(entry) {
+  if (!entry?.event?.id) return null;
+  return {
+    id: entry.event.id,
+    page: Math.max(0, Number(entry.page) || 0),
+    context: entry.context || {}
+  };
+}
+
+function persistStoryState() {
+  if (!state) return;
+  state.storyOpen = [activeStory, ...pendingStories]
+    .map(serializeStoryEntry)
+    .filter(Boolean);
+}
+
+function restoreStoryState() {
+  let sourceEntries = state.storyOpen || [];
+  if (!sourceEntries.length) {
+    sourceEntries = STORY_EVENTS
+      .filter((event) => event.blocking && state.storySeen?.[event.id] && !state.storyChoices?.[event.id])
+      .map((event) => ({ id: event.id, page: 0, context: {} }));
+  }
+  const restored = sourceEntries.map((entry) => {
+    const event = STORY_EVENTS.find((candidate) => candidate.id === entry.id);
+    if (!event) return null;
+    const maxPage = Math.max(0, event.pages.length - 1);
+    return {
+      event,
+      page: Math.max(0, Math.min(Number(entry.page) || 0, maxPage)),
+      context: entry.context || {}
+    };
+  }).filter(Boolean).filter(storyEntryStillValid);
+  activeStory = restored.shift() || null;
+  pendingStories = restored;
+  persistStoryState();
+}
+
+function isStoryBlocking() {
+  return Boolean(activeStory?.event?.blocking);
+}
+
+function storyCssUrl(url) {
+  return String(url || "").replaceAll('"', "%22");
+}
+
+function storyPageFor(event, page) {
+  return event.pages?.[page] || { speakerId: "narrator", text: "" };
+}
+
+function storySpeakerForPage(event, page) {
+  return String(storyPageFor(event, page).speakerId || "narrator").trim();
+}
+
+function storyTextForPage(event, page) {
+  const line = storyPageFor(event, page);
+  if (line.kind === "image") return line.imageSummary || "IMAGE DATA RECEIVED";
+  return String(line.text || "");
+}
+
+function storyHistoryTextForLine(line) {
+  if (line?.kind === "image") return `[IMAGE] ${line.imageSummary || line.imageUrl || "IMAGE DATA"}`;
+  return line?.text || "";
+}
+
+function storySpeakerMeta(event, speakerId) {
+  const id = String(speakerId || "narrator").trim();
+  const speaker = event.speakers?.[id];
+  if (speaker) return speaker;
+  return { id, name: id === "narrator" ? "??" : id, role: "", side: "system", slot: 999, icon: "" };
+}
+
+function storyHistoryMarkup(event, context, currentPage) {
+  const pages = event.pages.length ? event.pages : [{ speakerId: "narrator", text: "" }];
+  const start = Math.max(0, currentPage - 3);
+  return pages.slice(start, currentPage).map((line, index) => {
+    const pageIndex = start + index;
+    const speakerId = storySpeakerForPage(event, pageIndex);
+    const meta = storySpeakerMeta(event, speakerId);
+    return `<p data-speaker="${escapeHtml(meta.side)}" data-speaker-id="${escapeHtml(speakerId)}"><b>${escapeHtml(formatCommsText(meta.name, context))}</b><span>${escapeHtml(formatCommsText(storyHistoryTextForLine(line), context))}</span></p>`;
+  }).join("");
+}
+
+function storySpeakerCardMarkup(speaker, side, currentSpeakerId, context, depth) {
+  const speaking = speaker.id === currentSpeakerId;
+  const stackDepth = speaking ? 0 : depth;
+  const x = side === "left" ? -14 * stackDepth : 14 * stackDepth;
+  const y = 10 * stackDepth;
+  const scale = Math.max(0.82, 1 - stackDepth * 0.045);
+  const opacity = speaking ? 1 : 0.92;
+  const z = speaking ? 20 : Math.max(1, 12 - stackDepth);
+  const iconMarkup = speaker.icon
+    ? `<img src="${escapeHtml(speaker.icon)}" alt="">`
+    : `<span class="story-side-placeholder">NO IMAGE</span>`;
+  return `<article class="story-side story-side-card story-side-${side}${speaking ? " speaking" : " is-behind"}" style="--story-card-x:${x}px;--story-card-y:${y}px;--story-card-scale:${scale};--story-card-opacity:${opacity};z-index:${z};" data-speaker-id="${escapeHtml(speaker.id)}">
+    <div class="story-side-frame">${iconMarkup}</div>
+    <small>${escapeHtml(formatCommsText(speaker.role || "---", context))}</small>
+    <strong>${escapeHtml(formatCommsText(speaker.name || speaker.id, context))}</strong>
+  </article>`;
+}
+
+function renderStorySideStack(event, side, currentSpeakerId, context) {
+  const stack = document.getElementById(`story-${side}-stack`);
+  if (!stack) return;
+  const ids = event.speakerSides?.[side] || [];
+  const speakers = ids.map((id) => event.speakers?.[id]).filter(Boolean).sort((a, b) => (a.slot - b.slot) || a.id.localeCompare(b.id));
+  stack.classList.toggle("hidden", !speakers.length);
+  let depth = 1;
+  stack.innerHTML = speakers.map((speaker) => {
+    const markup = storySpeakerCardMarkup(speaker, side, currentSpeakerId, context, speaker.id === currentSpeakerId ? 0 : depth);
+    if (speaker.id !== currentSpeakerId) depth += 1;
+    return markup;
+  }).join("");
+}
+
+
+function renderStoryImagePopup(line, context = {}) {
+  const popup = document.getElementById("story-image-popup");
+  if (!popup) return;
+  const isImageLine = line?.kind === "image" && line.imageUrl;
+  popup.classList.toggle("hidden", !isImageLine);
+  popup.setAttribute("aria-hidden", isImageLine ? "false" : "true");
+  if (!isImageLine) return;
+  const imageUrl = formatCommsText(line.imageUrl, context);
+  const summary = formatCommsText(line.imageSummary || line.imageUrl, context);
+  const image = document.getElementById("story-image-popup-img");
+  const caption = document.getElementById("story-image-popup-caption");
+  if (image) {
+    image.src = imageUrl;
+    image.alt = summary;
+  }
+  if (caption) caption.textContent = summary;
+}
+
+function advanceStoryImagePopup() {
+  if (!activeStory) return;
+  const pages = activeStory.event.pages.length ? activeStory.event.pages : [{ speakerId: "narrator", text: "" }];
+  if (activeStory.page >= pages.length - 1) closeStoryComms("image_close");
+  else nextStoryPage();
+}
+
+
+function renderStoryComms() {
+  const overlay = document.getElementById("story-comms-overlay");
+  if (!overlay || !activeStory) {
+    if (overlay) {
+      overlay.classList.add("hidden");
+      overlay.setAttribute("aria-hidden", "true");
+    }
+    document.body.classList.remove("story-comms-active");
+    renderStoryImagePopup(null);
+    return;
+  }
+  const { event, page } = activeStory;
+  const pages = event.pages.length ? event.pages : [{ speakerId: "narrator", text: "" }];
+  const currentLine = storyPageFor(event, page);
+  const imageLine = currentLine.kind === "image" && currentLine.imageUrl;
+  const lastPage = page >= pages.length - 1;
+  document.body.classList.add("story-comms-active");
+  overlay.classList.remove("hidden");
+  overlay.setAttribute("aria-hidden", "false");
+  overlay.classList.toggle("blocking", Boolean(event.blocking));
+  const bg = document.getElementById("story-comms-bg");
+  if (bg) {
+    bg.style.backgroundImage = event.background
+      ? `linear-gradient(90deg, rgba(0,0,0,.74), rgba(0,0,0,.24) 42%, rgba(0,0,0,.68)), radial-gradient(circle at 50% 48%, rgba(72,219,234,.12), transparent 38%), url("${storyCssUrl(event.background)}")`
+      : "";
+  }
+  const closeButton = document.getElementById("story-comms-close");
+  if (closeButton) closeButton.hidden = Boolean(event.blocking);
+  const kickerElement = document.getElementById("story-kicker");
+  const titleElement = document.getElementById("story-comms-title");
+  const storyKicker = formatCommsText(event.kicker || "", activeStory.context).trim();
+  const storyTitle = formatCommsText(event.title || "", activeStory.context).trim();
+  if (kickerElement) {
+    kickerElement.textContent = storyKicker;
+    kickerElement.hidden = !storyKicker;
+  }
+  if (titleElement) {
+    titleElement.textContent = storyTitle;
+    titleElement.hidden = !storyTitle;
+  }
+  const speaker = storySpeakerForPage(event, page);
+  const speakerMeta = storySpeakerMeta(event, speaker);
+  overlay.dataset.speaker = speakerMeta.side;
+  overlay.dataset.speakerId = speaker;
+  const currentName = document.getElementById("story-current-name");
+  const currentRole = document.getElementById("story-current-role");
+  if (currentName) currentName.textContent = formatCommsText(speakerMeta.name, activeStory.context);
+  if (currentRole) {
+    const roleText = formatCommsText(speakerMeta.role, activeStory.context).trim();
+    currentRole.textContent = roleText;
+    currentRole.hidden = !roleText;
+  }
+  const historyElement = document.getElementById("story-history");
+  if (historyElement) historyElement.innerHTML = storyHistoryMarkup(event, activeStory.context, page);
+  const textElement = document.getElementById("story-text");
+  textElement.textContent = formatCommsText(storyTextForPage(event, page), activeStory.context);
+  textElement.classList.toggle("story-image-line", Boolean(imageLine));
+  textElement.classList.remove("live");
+  void textElement.offsetWidth;
+  textElement.classList.add("live");
+  document.getElementById("story-progress").textContent = pages.length > 1 ? `PACKET ${page + 1}/${pages.length}` : "";
+  renderStorySideStack(event, "left", speaker, activeStory.context);
+  renderStorySideStack(event, "right", speaker, activeStory.context);
+  renderStoryImagePopup(currentLine, activeStory.context);
+  document.getElementById("story-actions").innerHTML = imageLine
+    ? ""
+    : lastPage
+      ? (event.choices.length ? event.choices : [{ id: "close", label: text("comms_close", "LINK CLOSE") }]).map((choice) =>
+        `<button class="story-link-button" data-story-choice="${escapeHtml(choice.id)}"><span>${escapeHtml(choice.label)}</span><i></i></button>`
+      ).join("")
+      : `<button class="story-link-button story-next-button" data-story-next><span>NEXT</span><i></i></button>`;
+}
+
+function storyEffectApplies(effect, choiceId) {
+  return !effect.choice || effect.choice === "*" || effect.choice === choiceId;
+}
+
+function runStoryEffect(effect, context = {}) {
+  if (!effect) return;
+  if (effect.action === "comms") {
+    triggerComms(effect.value, context, { skipStory: true });
+    return;
+  }
+  runCommsEffect(effect);
+}
+
+function applyStoryEffects(event, choiceId, context = {}) {
+  (event.effects || [])
+    .filter((effect) => storyEffectApplies(effect, choiceId))
+    .forEach((effect) => runStoryEffect(effect, context));
+}
+
+function nextStoryPage() {
+  if (!activeStory) return;
+  activeStory.page += 1;
+  persistStoryState();
+  renderStoryComms();
+  playSound("comms_page", 0.12);
+}
+
+function closeStoryComms(choiceId = "close") {
+  if (!activeStory) return;
+  const closed = activeStory;
+  state.storyChoices[closed.event.id] = choiceId;
+  pendingStories = pendingStories.filter(storyEntryStillValid);
+  activeStory = pendingStories.shift() || null;
+  persistStoryState();
+  renderStoryComms();
+  applyStoryEffects(closed.event, choiceId, closed.context || {});
+  if (activeStory) playCommsSound(activeStory, "comms_next");
+  saveGame();
+}
+
+function clearStoryForTrigger(trigger) {
+  const ids = STORY_EVENTS.filter((event) => event.trigger === trigger).map((event) => event.id);
+  ids.forEach((id) => {
+    delete state.storySeen[id];
+    delete state.storyChoices[id];
+  });
+  const keepEntry = (entry) => entry?.event ? !ids.includes(entry.event.id) : !ids.includes(entry?.id);
+  if (activeStory && !keepEntry(activeStory)) activeStory = null;
+  pendingStories = pendingStories.filter(keepEntry);
+  state.storyOpen = (state.storyOpen || []).filter(keepEntry);
+}
+
+function triggerComms(trigger, context = {}, options = {}) {
   if (!state || state.ended) return;
+  if (!options.skipStory && triggerStoryEvent(trigger, context)) return;
   const events = COMM_EVENTS
     .filter((entry) => commsEventMatches(entry, trigger, context))
     .filter((event) => !hasMatchingQueuedComms(event, context));
@@ -3622,11 +4093,11 @@ function restoreCommsState() {
 }
 
 function isCommsBlocking() {
-  return Boolean(activeComms?.event?.blocking);
+  return Boolean(activeStory?.event?.blocking || activeComms?.event?.blocking);
 }
 
 function isCommsInteractionTarget(target) {
-  return Boolean(target?.closest?.("#comms-banner, #modal-backdrop, #toast-container, #confirm-widget, #start-screen"));
+  return Boolean(target?.closest?.("#story-comms-overlay, #comms-banner, #modal-backdrop, #toast-container, #confirm-widget, #start-screen"));
 }
 
 function renderComms() {
@@ -4226,7 +4697,9 @@ function beginPointerDrag(source, event, payload, startX = event.clientX, startY
     dropOrigin: null,
     dropUnitId: null,
     moved: false,
-    ghost: null
+    ghost: null,
+    ghostHalfWidth: 78,
+    ghostHalfHeight: 46
   };
   if (pointerDrag.source.setPointerCapture) {
     try {
@@ -4788,24 +5261,7 @@ function harvest(shelfIndex, slotIndex, sourceElement = null) {
   const plant = shelf.slots[slotIndex];
   if (!plant || !plant.ready) return;
 
-  const existing = state.inventory.find((batch) =>
-    batch.crop === plant.crop
-    && batch.quality === plant.quality
-    && batch.degraded === plant.degraded
-    && batch.age === 0
-  );
-  if (existing) existing.qty += 1;
-  else {
-    state.inventory.push({
-      id: `${Date.now()}-${Math.random()}`,
-      crop: plant.crop,
-      quality: plant.quality,
-      qty: 1,
-      age: 0,
-      degraded: plant.degraded
-    });
-  }
-
+  addInventoryFromPlant(plant);
   trackHarvestAnalytics(plant, shelf, 1);
   if (plant.crop === "tomato") state.tomatoHarvested = true;
   const harvestTarget = sourceElement || document.querySelector(`[data-shelf="${shelfIndex}"][data-slot="${slotIndex}"]`);
@@ -4848,23 +5304,7 @@ function harvestReadyPlantsInUnit(unitId, sourceElement = null) {
   let lastQuality = null;
   readySlots.forEach((slotIndex) => {
     const plant = shelf.slots[slotIndex];
-    const existing = state.inventory.find((batch) =>
-      batch.crop === plant.crop
-      && batch.quality === plant.quality
-      && batch.degraded === plant.degraded
-      && batch.age === 0
-    );
-    if (existing) existing.qty += 1;
-    else {
-      state.inventory.push({
-        id: `${Date.now()}-${Math.random()}`,
-        crop: plant.crop,
-        quality: plant.quality,
-        qty: 1,
-        age: 0,
-        degraded: plant.degraded
-      });
-    }
+    addInventoryFromPlant(plant);
     trackHarvestAnalytics(plant, shelf, 1);
     if (plant.crop === "tomato") state.tomatoHarvested = true;
     lastCrop = plant.crop;
@@ -5148,8 +5588,10 @@ function sellBatch(batchId) {
     rejectFeedback();
     return;
   }
+  refreshInventoryAges();
   const qty = Math.max(1, Math.min(batch.qty, saleQuantities[batchId] || 1));
-  const batchAge = Math.max(0, Number(batch.age) || 0);
+  const batchAge = inventoryAgeDays(batch);
+  if (isInventoryBatchDegraded(batch)) batch.degraded = true;
   const agedSale = batchAge >= 1;
   const unitPrice = getUnitPrice(batch);
   const revenue = unitPrice * qty;
@@ -5352,10 +5794,31 @@ function currentBaseElementSelector(kind, id) {
   return `[data-drag-kind="${kind}"][data-drag-id="${id}"]`;
 }
 
-function addInventoryFromPlant(plant) {
-  const existing = state.inventory.find((batch) => batch.crop === plant.crop && batch.quality === plant.quality && batch.degraded === plant.degraded && batch.age === 0);
-  if (existing) existing.qty += 1;
-  else state.inventory.push({ id: `${Date.now()}-${Math.random()}`, crop: plant.crop, quality: plant.quality, qty: 1, age: 0, degraded: plant.degraded });
+function addInventoryFromPlant(plant, harvestedAtDay = inventoryHarvestTimestamp()) {
+  const normalizedHarvestedAt = Number(harvestedAtDay);
+  const degraded = Boolean(plant.degraded);
+  const existing = state.inventory.find((batch) =>
+    batch.crop === plant.crop
+    && batch.quality === plant.quality
+    && Boolean(batch.degraded) === degraded
+    && Number(batch.harvestedAtDay) === normalizedHarvestedAt
+  );
+  if (existing) {
+    existing.qty += 1;
+    existing.age = inventoryAgeDays(existing);
+    return existing;
+  }
+  const batch = {
+    id: `${Date.now()}-${Math.random()}`,
+    crop: plant.crop,
+    quality: plant.quality,
+    qty: 1,
+    age: 0,
+    harvestedAtDay: normalizedHarvestedAt,
+    degraded
+  };
+  state.inventory.push(batch);
+  return batch;
 }
 
 function harvestPlantByRobot(base, unit, slotIndex, robot) {
@@ -5471,9 +5934,10 @@ function sellInventoryByRobot(cropId, marketId) {
   let maxBatchAge = 0;
   batches.forEach((batch) => {
     const amount = Math.max(0, Number(batch.qty) || 0);
+    const batchAge = inventoryAgeDays(batch);
+    if (isInventoryBatchDegraded(batch)) batch.degraded = true;
     const unitPrice = getUnitPrice(batch, marketId);
     const revenue = unitPrice * amount;
-    const batchAge = Math.max(0, Number(batch.age) || 0);
     if (amount <= 0) return;
     if (batchAge >= 1) agedSale = true;
     maxBatchAge = Math.max(maxBatchAge, batchAge);
@@ -5829,18 +6293,13 @@ function processDayBoundary() {
     }
   });
 
-  const degradeAfter = state.equipment.fridge ? 6 : 3;
-  state.inventory.forEach((batch) => {
-    batch.age += 1;
-    if (batch.age >= degradeAfter) batch.degraded = true;
-  });
-
   const upkeep = dailyUpkeep();
   state.money -= upkeep;
   if (state.money < 0) state.consecutiveDebtDays += 1;
   else state.consecutiveDebtDays = 0;
 
   state.day += 1;
+  refreshInventoryAges();
   const modeLimit = playModeLimit(state.mode);
   const debugMode = Boolean(state.debugMode);
   if (!debugMode && isTimedPlayMode(state.mode) && state.day > modeLimit) {
@@ -6154,6 +6613,8 @@ function clearSessionInteractionState() {
   cleanToolDrag = null;
   activeComms = null;
   pendingComms = [];
+  activeStory = null;
+  pendingStories = [];
 }
 
 function hasStartProgress() {
@@ -6259,6 +6720,7 @@ function startNewGame(mode = "normal") {
   clearSessionInteractionState();
   state = createInitialState(mode);
   updateMarketForDay();
+  clearStoryForTrigger("game_start");
   clearCommsForTrigger("game_start");
   startScreenOpen = false;
   lastTickAt = Date.now();
@@ -6266,6 +6728,8 @@ function startNewGame(mode = "normal") {
   document.body.classList.remove("start-screen-open");
   document.getElementById("modal-backdrop").classList.add("hidden");
   document.getElementById("comms-banner")?.classList.add("hidden");
+  document.getElementById("story-comms-overlay")?.classList.add("hidden");
+  document.body.classList.remove("story-comms-active");
   document.getElementById("modal-close").hidden = false;
   document.getElementById("modal-close").style.display = "";
   saveGame();
@@ -6340,7 +6804,10 @@ function closeStartScreen() {
   lastTickAt = Date.now();
   render();
   window.requestAnimationFrame(applyUiGuide);
-  if (isFreshOperationState()) clearCommsForTrigger("game_start");
+  if (isFreshOperationState()) {
+    clearStoryForTrigger("game_start");
+    clearCommsForTrigger("game_start");
+  }
   if (isFreshOperationState() || activeComms) triggerComms("game_start");
 }
 
@@ -7105,6 +7572,7 @@ function renderMarkets(direction = "") {
 }
 
 function renderInventory() {
+  refreshInventoryAges();
   const inventoryList = document.getElementById("inventory-list");
   const count = state.inventory.reduce((sum, batch) => sum + Math.max(0, Number(batch.qty) || 0), 0);
   document.getElementById("inventory-summary").innerHTML = `
@@ -7121,14 +7589,16 @@ function renderInventory() {
     const batchQty = Math.max(0, Number(batch.qty) || 0);
     const qty = Math.min(batchQty, saleQuantities[batch.id] || 1);
     const accepted = canSellCropToMarket(batch.crop, selectedMarket);
+    const batchAge = inventoryAgeDays(batch);
+    const degraded = isInventoryBatchDegraded(batch);
     const unitPrice = accepted ? getUnitPrice(batch) : 0;
     return `<div class="inventory-row" style="--crop-color:${crop.color};--quality-color:${QUALITY[batch.quality].color}">
       <div class="inventory-crop">
         <span class="crop-glyph"><img src="${crop.icon}" alt=""></span>
-        <span><strong>${crop.name} x${batchQty}</strong><small>${batch.degraded ? "劣化品 / 売値50%" : "FRESH HARVEST"}</small></span>
+        <span><strong>${crop.name} x${batchQty}</strong><small>${degraded ? "劣化品 / 売値50%" : "FRESH HARVEST"}</small></span>
       </div>
       <div class="quality-cell"><span class="quality-badge">${batch.quality}</span></div>
-      <div class="age-cell"><span class="inventory-label">AGE</span><br><strong>${batch.age} DAY</strong></div>
+      <div class="age-cell"><span class="inventory-label">AGE</span><br><strong>${batchAge} DAY</strong></div>
       <div class="unit-price-cell"><span class="inventory-label">UNIT</span><br><strong>${accepted ? `₡${formatNumber(unitPrice)}` : "--"}</strong></div>
       <div class="qty-control">
         <button data-qty-id="${batch.id}" data-delta="-1">-</button>
@@ -7502,6 +7972,7 @@ renderHeader();
   } else {
     updateFarmProgress();
   }
+  if (document.getElementById("market-screen")?.classList.contains("active")) renderInventory();
   if (document.getElementById("schedule-screen")?.classList.contains("active")) renderSchedule();
   if (document.getElementById("radio-screen")?.classList.contains("active")) renderRadio();
   if (document.getElementById("info-screen")?.classList.contains("active")) renderInfo();
@@ -7567,6 +8038,33 @@ function bindEvents() {
     if (event.target.closest("#confirm-ok")) {
       event.preventDefault();
       confirmWidgetAction();
+      return;
+    }
+
+    const storyImageClose = event.target.closest("[data-story-image-close]");
+    if (storyImageClose) {
+      event.preventDefault();
+      advanceStoryImagePopup();
+      return;
+    }
+
+    const storyNext = event.target.closest("[data-story-next]");
+    if (storyNext) {
+      event.preventDefault();
+      nextStoryPage();
+      return;
+    }
+
+    const storyChoice = event.target.closest("[data-story-choice]");
+    if (storyChoice) {
+      event.preventDefault();
+      closeStoryComms(storyChoice.dataset.storyChoice);
+      return;
+    }
+
+    if (event.target.closest("#story-comms-close")) {
+      event.preventDefault();
+      closeStoryComms("dismiss");
       return;
     }
 
@@ -8008,8 +8506,12 @@ function bindEvents() {
     if (!pointerDrag.moved) {
       pointerDrag.moved = true;
       pointerDrag.source.classList.add("dragging");
+      document.documentElement.classList.add("drag-active");
       document.body.classList.add("drag-active");
-      if (dragPayload.type === "equipment") document.body.classList.add("equipment-drag-active");
+      if (dragPayload.type === "equipment") {
+        document.documentElement.classList.add("equipment-drag-active");
+        document.body.classList.add("equipment-drag-active");
+      }
       pointerDrag.ghost = pointerDrag.source.cloneNode(true);
       pointerDrag.ghost.className = "drag-ghost";
       pointerDrag.ghost.removeAttribute("data-guide-active");
@@ -8018,10 +8520,16 @@ function bindEvents() {
         element.removeAttribute("data-guide-active");
       });
       document.body.appendChild(pointerDrag.ghost);
+      const ghostRect = pointerDrag.ghost.getBoundingClientRect();
+      pointerDrag.ghostHalfWidth = Math.max(48, Math.min(ghostRect.width / 2, 96));
+      pointerDrag.ghostHalfHeight = Math.max(32, Math.min(ghostRect.height / 2, 72));
     }
     event.preventDefault();
-    pointerDrag.ghost.style.left = `${event.clientX}px`;
-    pointerDrag.ghost.style.top = `${event.clientY}px`;
+    const ghostMargin = 8;
+    const ghostX = Math.min(Math.max(event.clientX, pointerDrag.ghostHalfWidth + ghostMargin), window.innerWidth - pointerDrag.ghostHalfWidth - ghostMargin);
+    const ghostY = Math.min(Math.max(event.clientY, pointerDrag.ghostHalfHeight + ghostMargin), window.innerHeight - pointerDrag.ghostHalfHeight - ghostMargin);
+    pointerDrag.ghost.style.left = `${ghostX}px`;
+    pointerDrag.ghost.style.top = `${ghostY}px`;
     const ignoredItem = dragPayload.type === "equipment" ? pointerDrag.source : null;
     const hovered = interactiveElementFromPoint(event.clientX, event.clientY, ignoredItem);
     const slot = hovered && hovered.closest("[data-shelf][data-slot]");
@@ -8253,6 +8761,7 @@ function clearDragState() {
     document.querySelector(".facility-grid-shell")?.classList.remove("panning");
     facilityPan = null;
   }
+  document.documentElement.classList.remove("drag-active", "equipment-drag-active");
   document.body.classList.remove("drag-active", "equipment-drag-active");
   document.querySelectorAll(".dragging, .drop-target, .drop-footprint, .seed-drop-target, .moving-coverage").forEach(clearMovingCoverageClasses);
   window.requestAnimationFrame(applyUiGuide);
