@@ -332,7 +332,8 @@ function scheduleInputDiagnosticRender() {
 }
 
 function inputDiagnosticRecordInput(event) {
-  if (!inputDiagnosticState.enabled) return;
+  if (!inputDiagnosticState.enabled || event.__ugInputDiagnosticSeen) return;
+  event.__ugInputDiagnosticSeen = true;
   const touch = event.changedTouches?.[0] || event.touches?.[0] || null;
   const x = Number.isFinite(event.clientX) ? event.clientX : touch?.clientX;
   const y = Number.isFinite(event.clientY) ? event.clientY : touch?.clientY;
@@ -356,8 +357,11 @@ function initInputDiagnostics() {
     return;
   }
   ensureInputDiagnosticPanel();
-  ["touchstart", "touchend", "pointerdown", "pointerup", "click"].forEach((type) => {
-    document.addEventListener(type, inputDiagnosticRecordInput, { capture: true, passive: true });
+  const diagnosticTargets = [window, document, document.documentElement, document.body].filter(Boolean);
+  ["touchstart", "touchend", "touchcancel", "pointerdown", "pointerup", "pointercancel", "click"].forEach((type) => {
+    diagnosticTargets.forEach((target) => {
+      target.addEventListener(type, inputDiagnosticRecordInput, { capture: true, passive: true });
+    });
   });
   window.addEventListener("error", (event) => {
     inputDiagnosticLog("error", event.message || String(event.error || event));
@@ -1144,7 +1148,11 @@ function hideBootLoading() {
   if (!overlay || overlay.dataset.hiding === "true") return;
   overlay.dataset.hiding = "true";
   overlay.classList.add("hidden");
-  window.setTimeout(() => overlay.remove(), 420);
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.style.pointerEvents = "none";
+  overlay.style.visibility = "hidden";
+  overlay.style.display = "none";
+  window.requestAnimationFrame(() => overlay.remove());
 }
 
 function addAssetUrl(set, value) {

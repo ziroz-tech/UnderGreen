@@ -5748,10 +5748,10 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 }
 
 .boot-loading.hidden {
+  display: none;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity .32s ease, visibility .32s ease;
 }
 
 .boot-loading-panel {
@@ -8057,20 +8057,20 @@ body.drag-active .guide-pulse {
 
 .ios-input-diagnostic {
   position: fixed;
+  top: max(8px, env(safe-area-inset-top));
   left: max(8px, env(safe-area-inset-left));
-  right: max(8px, env(safe-area-inset-right));
-  bottom: max(8px, env(safe-area-inset-bottom));
   z-index: 12000;
-  max-height: min(46vh, 360px);
-  padding: 10px 12px;
+  width: min(560px, calc(100vw - 16px));
+  max-height: min(32vh, 260px);
+  padding: 8px 10px;
   border: 1px solid rgba(245, 214, 91, 0.78);
-  background: rgba(2, 9, 7, 0.9);
+  background: rgba(2, 9, 7, 0.86);
   color: #e9fff4;
   box-shadow: 0 0 28px rgba(245, 214, 91, 0.18), inset 0 0 24px rgba(113, 255, 184, 0.08);
   pointer-events: none;
-  user-select: text;
-  -webkit-user-select: text;
-  font: 11px/1.42 Consolas, "Noto Sans JP", monospace;
+  user-select: none;
+  -webkit-user-select: none;
+  font: 10px/1.35 Consolas, "Noto Sans JP", monospace;
   overflow: hidden;
 }
 
@@ -8084,7 +8084,7 @@ body.drag-active .guide-pulse {
 
 .ios-input-diagnostic pre {
   margin: 0;
-  max-height: calc(min(46vh, 360px) - 38px);
+  max-height: calc(min(32vh, 260px) - 34px);
   overflow: hidden;
   white-space: pre-wrap;
   word-break: break-word;
@@ -8092,11 +8092,11 @@ body.drag-active .guide-pulse {
 
 @media (max-width: 760px) {
   .ios-input-diagnostic {
-    font-size: 10px;
-    max-height: 50vh;
+    font-size: 9px;
+    max-height: 34vh;
   }
 
   .ios-input-diagnostic pre {
-    max-height: calc(50vh - 38px);
+    max-height: calc(34vh - 34px);
   }
 }
