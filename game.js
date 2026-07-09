@@ -220,6 +220,7 @@ const inputDiagnosticState = {
   events: []
 };
 let inputDiagnosticRenderQueued = false;
+const inputDiagnosticSeenEvents = new WeakSet();
 window.__ugInputDiagnostics = inputDiagnosticState;
 
 function isAppleTouchDevice() {
@@ -319,6 +320,7 @@ function renderInputDiagnosticPanel() {
     : "assetFailures=0";
   body.textContent = [
     `stage=${inputDiagnosticState.bootStage}`,
+    "diag=weakset touchGuard=strict",
     `flags bind=${inputDiagnosticState.bindEventsReached} render=${inputDiagnosticState.renderReached} start=${inputDiagnosticState.startScreenReached} bootHidden=${inputDiagnosticState.bootOverlayHidden}`,
     `viewport=${viewport} inner=${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio || 1}`,
     support,
@@ -340,8 +342,8 @@ function scheduleInputDiagnosticRender() {
 }
 
 function inputDiagnosticRecordInput(event) {
-  if (!inputDiagnosticState.enabled || event.__ugInputDiagnosticSeen) return;
-  event.__ugInputDiagnosticSeen = true;
+  if (!inputDiagnosticState.enabled || inputDiagnosticSeenEvents.has(event)) return;
+  inputDiagnosticSeenEvents.add(event);
   const touch = event.changedTouches?.[0] || event.touches?.[0] || null;
   const x = Number.isFinite(event.clientX) ? event.clientX : touch?.clientX;
   const y = Number.isFinite(event.clientY) ? event.clientY : touch?.clientY;
@@ -7262,16 +7264,125 @@ function handleStartTitleTap() {
   startDebugGame();
 }
 
+const APPLE_TOUCH_ACTION_MAX_DURATION_MS = 1200;
+const APPLE_TOUCH_ACTION_MAX_MOVE_PX = 24;
+const APPLE_TOUCH_ACTION_RESUME_BLOCK_MS = 1200;
 let lastAppleTouchStartActionAt = 0;
+let appleTouchStartCandidate = null;
+let appleTouchActionBlockedUntil = 0;
+let appleTouchActionGuardsBound = false;
 
-function handleAppleTouchStartAction(event, action) {
+function getAppleTouchEventPoint(event) {
+  const touch = event.changedTouches?.[0] || event.touches?.[0] || null;
+  const x = Number.isFinite(event.clientX) ? event.clientX : touch?.clientX;
+  const y = Number.isFinite(event.clientY) ? event.clientY : touch?.clientY;
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function countAppleTouchPoints(event) {
+  if (event.touches && event.touches.length > 1) return event.touches.length;
+  if (event.changedTouches && event.changedTouches.length > 1) return event.changedTouches.length;
+  return 1;
+}
+
+function armAppleTouchActionGuard(reason) {
   if (!APPLE_TOUCH_DEVICE) return;
+  appleTouchStartCandidate = null;
+  appleTouchActionBlockedUntil = Math.max(appleTouchActionBlockedUntil, Date.now() + APPLE_TOUCH_ACTION_RESUME_BLOCK_MS);
+  inputDiagnosticLog("touch-guard", reason);
+}
+
+function bindAppleTouchActionGuards() {
+  if (!APPLE_TOUCH_DEVICE || appleTouchActionGuardsBound) return;
+  appleTouchActionGuardsBound = true;
+  window.addEventListener("pagehide", () => armAppleTouchActionGuard("pagehide"));
+  window.addEventListener("pageshow", () => armAppleTouchActionGuard("pageshow"));
+  window.addEventListener("blur", () => armAppleTouchActionGuard("blur"));
+  window.addEventListener("focus", () => armAppleTouchActionGuard("focus"));
+  document.addEventListener("visibilitychange", () => armAppleTouchActionGuard(`visibility=${document.visibilityState}`));
+}
+
+function beginAppleTouchStartAction(event, element) {
+  if (!APPLE_TOUCH_DEVICE) return;
+  inputDiagnosticRecordInput(event);
+  if (Date.now() < appleTouchActionBlockedUntil || countAppleTouchPoints(event) !== 1) {
+    appleTouchStartCandidate = null;
+    return;
+  }
+  const point = getAppleTouchEventPoint(event);
+  if (!point) return;
+  appleTouchStartCandidate = {
+    element,
+    pointerId: Number.isFinite(event.pointerId) ? event.pointerId : null,
+    startedAt: Date.now(),
+    x: point.x,
+    y: point.y
+  };
+}
+
+function cancelAppleTouchStartAction(event, reason = "cancel") {
+  if (!APPLE_TOUCH_DEVICE) return;
+  inputDiagnosticRecordInput(event);
+  if (appleTouchStartCandidate) inputDiagnosticLog("touch-skip", reason);
+  appleTouchStartCandidate = null;
+}
+
+function trackAppleTouchStartMove(event) {
+  if (!APPLE_TOUCH_DEVICE || !appleTouchStartCandidate) return;
+  inputDiagnosticRecordInput(event);
+  if (countAppleTouchPoints(event) !== 1) {
+    cancelAppleTouchStartAction(event, "multi-touch");
+    return;
+  }
+  const point = getAppleTouchEventPoint(event);
+  if (!point) return;
+  const distance = Math.hypot(point.x - appleTouchStartCandidate.x, point.y - appleTouchStartCandidate.y);
+  if (distance > APPLE_TOUCH_ACTION_MAX_MOVE_PX) cancelAppleTouchStartAction(event, `move=${Math.round(distance)}`);
+}
+
+function finishAppleTouchStartAction(event, element, action) {
+  if (!APPLE_TOUCH_DEVICE) return;
+  inputDiagnosticRecordInput(event);
   const now = Date.now();
+  const candidate = appleTouchStartCandidate;
+  appleTouchStartCandidate = null;
+  if (!candidate) {
+    inputDiagnosticLog("touch-skip", "no-start");
+    return;
+  }
+  if (now < appleTouchActionBlockedUntil) {
+    inputDiagnosticLog("touch-skip", "resume-guard");
+    return;
+  }
+  if (candidate.element !== element) {
+    inputDiagnosticLog("touch-skip", "element-mismatch");
+    return;
+  }
+  if (candidate.pointerId !== null && Number.isFinite(event.pointerId) && candidate.pointerId !== event.pointerId) {
+    inputDiagnosticLog("touch-skip", "pointer-mismatch");
+    return;
+  }
+  if (countAppleTouchPoints(event) !== 1) {
+    inputDiagnosticLog("touch-skip", "multi-end");
+    return;
+  }
+  const point = getAppleTouchEventPoint(event);
+  const duration = now - candidate.startedAt;
+  const distance = point ? Math.hypot(point.x - candidate.x, point.y - candidate.y) : 0;
+  const topElement = point ? document.elementFromPoint(point.x, point.y) : null;
+  if (duration > APPLE_TOUCH_ACTION_MAX_DURATION_MS || distance > APPLE_TOUCH_ACTION_MAX_MOVE_PX) {
+    inputDiagnosticLog("touch-skip", `gesture duration=${duration} move=${Math.round(distance)}`);
+    return;
+  }
+  if (topElement && !element.contains(topElement) && topElement !== element) {
+    inputDiagnosticLog("touch-skip", `top=${inputDiagnosticElementLabel(topElement)}`);
+    return;
+  }
   if (now - lastAppleTouchStartActionAt < 280) return;
   lastAppleTouchStartActionAt = now;
-  inputDiagnosticRecordInput(event);
   event.preventDefault();
   event.stopPropagation();
+  inputDiagnosticLog("touch-action", element.id || inputDiagnosticElementLabel(element));
   action();
 }
 
@@ -7279,15 +7390,24 @@ function bindAppleTouchStartControl(id, action) {
   const element = document.getElementById(id);
   if (!element || element.dataset.appleTouchBound === "true") return;
   element.dataset.appleTouchBound = "true";
-  element.addEventListener("touchend", (event) => handleAppleTouchStartAction(event, action), { passive: false });
+  element.addEventListener("touchstart", (event) => beginAppleTouchStartAction(event, element), { passive: true });
+  element.addEventListener("touchmove", trackAppleTouchStartMove, { passive: true });
+  element.addEventListener("touchcancel", (event) => cancelAppleTouchStartAction(event, "touchcancel"), { passive: true });
+  element.addEventListener("touchend", (event) => finishAppleTouchStartAction(event, element, action), { passive: false });
+  element.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse") return;
+    beginAppleTouchStartAction(event, element);
+  }, { passive: true });
+  element.addEventListener("pointercancel", (event) => cancelAppleTouchStartAction(event, "pointercancel"), { passive: true });
   element.addEventListener("pointerup", (event) => {
     if (event.pointerType === "mouse") return;
-    handleAppleTouchStartAction(event, action);
+    finishAppleTouchStartAction(event, element, action);
   }, { passive: false });
 }
 
 function bindAppleTouchStartControls() {
   if (!APPLE_TOUCH_DEVICE) return;
+  bindAppleTouchActionGuards();
   bindAppleTouchStartControl("start-continue", handleStartPrimary);
   bindAppleTouchStartControl("start-day30", requestSelectedModeGame);
   bindAppleTouchStartControl("start-new", handleStartContinue);
