@@ -199,6 +199,177 @@ let currentUiScale = 1;
 let lastLogToastMessage = "";
 let lastLogToastAt = 0;
 
+const INPUT_DIAGNOSTIC_PARAM = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get("debuginput");
+  } catch (error) {
+    return null;
+  }
+})();
+const INPUT_DIAGNOSTIC_ENABLED = INPUT_DIAGNOSTIC_PARAM === "1"
+  || (INPUT_DIAGNOSTIC_PARAM !== "0" && isAppleTouchDevice());
+const inputDiagnosticState = {
+  enabled: INPUT_DIAGNOSTIC_ENABLED,
+  bootStage: "script-loaded",
+  lastInput: "none",
+  lastTopElement: "-",
+  bootOverlayHidden: false,
+  bindEventsReached: false,
+  renderReached: false,
+  startScreenReached: false,
+  events: []
+};
+let inputDiagnosticRenderQueued = false;
+window.__ugInputDiagnostics = inputDiagnosticState;
+
+function isAppleTouchDevice() {
+  const ua = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  return /iPad|iPhone|iPod/i.test(ua)
+    || (platform === "MacIntel" && Number(navigator.maxTouchPoints) > 1);
+}
+
+function inputDiagnosticElementLabel(element) {
+  if (!element) return "-";
+  if (element === window) return "window";
+  if (element === document) return "document";
+  const tag = String(element.tagName || "node").toLowerCase();
+  const id = element.id ? `#${element.id}` : "";
+  const classText = typeof element.className === "string"
+    ? element.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).join(".")
+    : "";
+  return `${tag}${id}${classText ? `.${classText}` : ""}`;
+}
+
+function inputDiagnosticLayerLine(id) {
+  const element = document.getElementById(id);
+  if (!element) return `${id}:missing`;
+  const style = window.getComputedStyle(element);
+  const stateText = element.classList.contains("hidden") ? "hidden" : "shown";
+  return `${id}:${stateText} display=${style.display} vis=${style.visibility} pe=${style.pointerEvents} z=${style.zIndex}`;
+}
+
+function inputDiagnosticLog(type, message = "") {
+  if (!inputDiagnosticState.enabled) return;
+  inputDiagnosticState.events.push({
+    at: (performance.now() / 1000).toFixed(1),
+    type,
+    message: String(message || "").slice(0, 220)
+  });
+  if (inputDiagnosticState.events.length > 12) inputDiagnosticState.events.shift();
+  scheduleInputDiagnosticRender();
+}
+
+function setInputDiagnosticStage(stage, detail = "") {
+  if (!inputDiagnosticState.enabled) return;
+  inputDiagnosticState.bootStage = stage;
+  inputDiagnosticLog("stage", detail ? `${stage} // ${detail}` : stage);
+}
+
+function ensureInputDiagnosticPanel() {
+  if (!inputDiagnosticState.enabled || !document.body) return null;
+  let panel = document.getElementById("ios-input-diagnostic");
+  if (panel) return panel;
+  panel = document.createElement("aside");
+  panel.id = "ios-input-diagnostic";
+  panel.className = "ios-input-diagnostic";
+  panel.setAttribute("aria-live", "polite");
+  panel.innerHTML = `
+    <div class="ios-input-diagnostic-title">iPad input diagnostic</div>
+    <pre id="ios-input-diagnostic-body"></pre>
+  `;
+  document.body.appendChild(panel);
+  return panel;
+}
+
+function renderInputDiagnosticPanel() {
+  inputDiagnosticRenderQueued = false;
+  const panel = ensureInputDiagnosticPanel();
+  if (!panel) return;
+  const body = document.getElementById("ios-input-diagnostic-body");
+  if (!body) return;
+  const viewport = window.visualViewport
+    ? `${Math.round(window.visualViewport.width)}x${Math.round(window.visualViewport.height)} scale=${window.visualViewport.scale}`
+    : `${window.innerWidth}x${window.innerHeight}`;
+  const support = [
+    `PointerEvent=${"PointerEvent" in window}`,
+    `TouchEvent=${"TouchEvent" in window}`,
+    `maxTouch=${navigator.maxTouchPoints || 0}`,
+    `platform=${navigator.platform || "-"}`
+  ].join(" ");
+  const layers = [
+    inputDiagnosticLayerLine("boot-loading"),
+    inputDiagnosticLayerLine("start-screen"),
+    inputDiagnosticLayerLine("modal-backdrop"),
+    inputDiagnosticLayerLine("story-comms-overlay"),
+    inputDiagnosticLayerLine("confirm-widget")
+  ].join("\n");
+  const recent = inputDiagnosticState.events
+    .map((event) => `${event.at}s ${event.type}: ${event.message}`)
+    .join("\n");
+  const assetFailures = Array.isArray(window.BOOT_ASSET_FAILURES) && window.BOOT_ASSET_FAILURES.length
+    ? `assetFailures=${window.BOOT_ASSET_FAILURES.length} first=${window.BOOT_ASSET_FAILURES[0].path}`
+    : "assetFailures=0";
+  body.textContent = [
+    `stage=${inputDiagnosticState.bootStage}`,
+    `flags bind=${inputDiagnosticState.bindEventsReached} render=${inputDiagnosticState.renderReached} start=${inputDiagnosticState.startScreenReached} bootHidden=${inputDiagnosticState.bootOverlayHidden}`,
+    `viewport=${viewport} inner=${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio || 1}`,
+    support,
+    `lastInput=${inputDiagnosticState.lastInput}`,
+    `lastTop=${inputDiagnosticState.lastTopElement}`,
+    assetFailures,
+    "layers:",
+    layers,
+    "recent:",
+    recent || "-"
+  ].join("\n");
+}
+
+function scheduleInputDiagnosticRender() {
+  if (!inputDiagnosticState.enabled || inputDiagnosticRenderQueued) return;
+  inputDiagnosticRenderQueued = true;
+  window.requestAnimationFrame(renderInputDiagnosticPanel);
+}
+
+function inputDiagnosticRecordInput(event) {
+  if (!inputDiagnosticState.enabled) return;
+  const touch = event.changedTouches?.[0] || event.touches?.[0] || null;
+  const x = Number.isFinite(event.clientX) ? event.clientX : touch?.clientX;
+  const y = Number.isFinite(event.clientY) ? event.clientY : touch?.clientY;
+  const topElement = Number.isFinite(x) && Number.isFinite(y) ? document.elementFromPoint(x, y) : document.activeElement;
+  inputDiagnosticState.lastTopElement = inputDiagnosticElementLabel(topElement);
+  inputDiagnosticState.lastInput = [
+    event.type,
+    `target=${inputDiagnosticElementLabel(event.target)}`,
+    `top=${inputDiagnosticState.lastTopElement}`,
+    Number.isFinite(x) && Number.isFinite(y) ? `xy=${Math.round(x)},${Math.round(y)}` : "xy=-",
+    event.pointerType ? `pointer=${event.pointerType}` : "",
+    `trusted=${event.isTrusted}`
+  ].filter(Boolean).join(" ");
+  inputDiagnosticLog("input", inputDiagnosticState.lastInput);
+}
+
+function initInputDiagnostics() {
+  if (!inputDiagnosticState.enabled) return;
+  if (!document.body) {
+    document.addEventListener("DOMContentLoaded", initInputDiagnostics, { once: true });
+    return;
+  }
+  ensureInputDiagnosticPanel();
+  ["touchstart", "touchend", "pointerdown", "pointerup", "click"].forEach((type) => {
+    document.addEventListener(type, inputDiagnosticRecordInput, { capture: true, passive: true });
+  });
+  window.addEventListener("error", (event) => {
+    inputDiagnosticLog("error", event.message || String(event.error || event));
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    inputDiagnosticLog("reject", event.reason?.message || String(event.reason));
+  });
+  window.setInterval(renderInputDiagnosticPanel, 1000);
+  inputDiagnosticLog("init", "diagnostic panel ready");
+}
+
+initInputDiagnostics();
 function normalizeUiGuide(guide) {
   if (!guide) return null;
   if (typeof guide === "string") return guide.trim() ? { target: guide.trim() } : null;
@@ -968,6 +1139,8 @@ function setBootLoadingProgress(done, total, label = "素材を読み込んで�
 
 function hideBootLoading() {
   const overlay = document.getElementById("boot-loading");
+  inputDiagnosticState.bootOverlayHidden = true;
+  inputDiagnosticLog("boot", "boot-loading hidden");
   if (!overlay || overlay.dataset.hiding === "true") return;
   overlay.dataset.hiding = "true";
   overlay.classList.add("hidden");
@@ -2555,8 +2728,7 @@ function preferredSupportRobotPosition(base, item) {
 function hasCompletedCommsTrigger(trigger) {
   const commCompleted = COMM_EVENTS.some((event) => event.trigger === trigger && state.commsChoices?.[event.id]);
   const storyCompleted = STORY_EVENTS.some((event) => event.trigger === trigger && state.storyChoices?.[event.id]);
-  const legacyCompleted = trigger === "first_place" && Boolean(state.commsChoices?.first_place_v4);
-  return commCompleted || storyCompleted || legacyCompleted;
+  return commCompleted || storyCompleted;
 }
 
 function grantFloorDevice(type) {
@@ -9121,21 +9293,33 @@ function clearDragState() {
 }
 
 async function bootstrap() {
+  setInputDiagnosticStage("bootstrap:start");
   setBootLoadingProgress(0, REQUIRED_GAME_DATA_PATHS.length, "CSVデータを読み込んでいます...");
+  setInputDiagnosticStage("data:verify");
   await verifyRequiredGameData();
+  setInputDiagnosticStage("data:load");
   await loadExternalData();
+  setInputDiagnosticStage("assets:preload");
   await preloadBootAssets();
   setBootLoadingProgress(1, 1, "画面を準備しています...");
   startModeView = validPlayMode(safeStorageGet(START_MODE_PREF_KEY), "day45");
+  setInputDiagnosticStage("game:load");
   loadGame();
   applyUiScale();
+  setInputDiagnosticStage("events:bind");
   bindEvents();
+  inputDiagnosticState.bindEventsReached = true;
   updateFullscreenButton();
   markTabOpened("farm");
+  setInputDiagnosticStage("render");
   render();
+  inputDiagnosticState.renderReached = true;
   pushLogEntry(state.log, "status", { duration: 5200 });
+  setInputDiagnosticStage("start-screen");
   openStartScreen({ persist: false });
+  inputDiagnosticState.startScreenReached = true;
   hideBootLoading();
+  setInputDiagnosticStage("ready");
   window.setInterval(realtimeTick, 200);
 }
 
@@ -9150,6 +9334,7 @@ function missingDataListHtml(error) {
 
 function showBootstrapError(error) {
   hideBootLoading();
+  setInputDiagnosticStage("boot:error", error?.message || String(error));
   console.error(error);
   const isFile = window.location.protocol === "file:";
   const failures = Array.isArray(error?.failures) ? error.failures : [];
