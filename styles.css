@@ -23,6 +23,8 @@
 html {
   min-height: 100%;
   background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -54,6 +56,7 @@ body::before {
 button {
   color: inherit;
   font: inherit;
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -230,6 +233,7 @@ h1 span {
 }
 
 .fullscreen-button {
+  min-width: 46px;
   font: 900 11px Consolas, monospace;
   letter-spacing: .08em;
 }
@@ -3070,10 +3074,12 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 
 .inventory-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) 0.5fr 0.7fr 0.8fr 1fr auto;
+  grid-template-columns: minmax(150px, 1.4fr) 34px 74px 88px 104px 136px;
   align-items: center;
-  gap: 12px;
-  padding: 12px 4px;
+  gap: 10px;
+  min-height: 72px;
+  box-sizing: border-box;
+  padding: 10px 4px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -3085,6 +3091,7 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .inventory-crop .crop-glyph {
@@ -3100,7 +3107,11 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 
 .inventory-crop strong {
   display: block;
+  max-width: 100%;
+  overflow: hidden;
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inventory-crop small,
@@ -3127,6 +3138,11 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 .qty-control {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 104px;
+  min-width: 104px;
+  height: 32px;
+  box-sizing: border-box;
   border: 1px solid var(--line);
 }
 
@@ -3156,10 +3172,17 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 }
 
 .sell-button {
-  padding: 9px 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 136px;
+  min-width: 136px;
+  height: 34px;
+  padding: 0 10px;
   color: #04100a;
   background: var(--green);
   font-size: 10px;
+  white-space: nowrap;
 }
 
 .sell-button:hover,
@@ -5598,7 +5621,7 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   }
 
   .inventory-row {
-    grid-template-columns: 1fr 0.4fr 0.7fr auto;
+    grid-template-columns: minmax(150px, 1fr) 34px 104px 136px;
   }
 
   .inventory-row .age-cell,
@@ -5687,7 +5710,16 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   }
 
   .inventory-row {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(120px, 1fr) 128px;
+  }
+
+  .inventory-row .qty-control {
+    display: none;
+  }
+
+  .inventory-row .sell-button {
+    width: 128px;
+    min-width: 128px;
   }
 
   .inventory-row .quality-cell,
@@ -5900,7 +5932,7 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 }
 
 .market-trade-layout .inventory-row {
-  grid-template-columns: minmax(160px, 1fr) 34px 70px 82px minmax(100px, .8fr) auto;
+  grid-template-columns: minmax(160px, 1fr) 34px 70px 82px 104px 136px;
 }
 
 @keyframes marketCenterSettle {
@@ -5931,7 +5963,7 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   }
 
   .market-trade-layout .inventory-row {
-    grid-template-columns: minmax(150px, 1.2fr) 34px 70px 80px minmax(100px, .8fr) auto;
+    grid-template-columns: minmax(150px, 1.2fr) 34px 70px 80px 104px 136px;
   }
 }
 
@@ -6485,6 +6517,10 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   backdrop-filter: blur(6px);
 }
 
+.start-screen .fullscreen-button {
+  min-width: 54px;
+}
+
 .start-screen .start-status {
   position: absolute;
   left: clamp(14px, 2.4vw, 30px);
@@ -6706,6 +6742,26 @@ body.start-screen-open {
   border-color: rgba(113, 255, 184, 0.52);
   color: var(--green);
   background: rgba(3, 20, 12, 0.62);
+}
+@media (max-width: 520px) {
+  .start-screen .start-tools {
+    gap: 5px;
+    right: 8px;
+  }
+
+  .start-mode-chip {
+    min-width: 76px;
+    padding: 0 7px;
+  }
+
+  .start-screen .start-tool-button {
+    min-width: 40px;
+    padding: 0 7px;
+  }
+
+  .start-screen .fullscreen-button {
+    min-width: 48px;
+  }
 }
 
 @keyframes title-lettuce-breathe {

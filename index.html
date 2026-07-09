@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=166">
+    <link rel="stylesheet" href="styles.css?v=199">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -26,12 +26,11 @@
       <div class="day-counter">
         <div class="day-readout">
           <span>OPERATION DAY</span>
-          <strong><b id="day-value">01</b><span id="day-limit"> / 30</span></strong>
+          <strong><b id="day-value">01</b><span id="day-limit"> / DAY45</span></strong>
           <div class="day-progress"><i id="day-progress-fill"></i></div>
           <small id="time-remaining">20.0 SEC</small>
         </div>
       </div>
-      <button class="icon-button fullscreen-button" id="fullscreen-button" type="button" title="Fullscreen mode" aria-label="Fullscreen mode" aria-pressed="false">FS</button>
       <button class="icon-button" id="reset-button" type="button" title="終了" aria-label="終了">⏻</button>
     </header>
 
@@ -261,8 +260,9 @@
   <div class="start-screen hidden" id="start-screen" aria-hidden="true">
     <section class="start-panel" role="dialog" aria-modal="true" aria-labelledby="start-title">
       <div class="start-tools" aria-label="Start screen tools">
-        <span class="start-mode-chip" id="start-mode-label">DAY60 MODE</span>
+        <span class="start-mode-chip" id="start-mode-label">DAY45 MODE</span>
         <button class="start-tool-button" id="start-mode-toggle" type="button" title="Mode" aria-label="Mode">MODE</button>
+        <button class="start-tool-button fullscreen-button" id="fullscreen-button" type="button" title="Fullscreen mode" aria-label="Fullscreen mode" aria-pressed="false">FULL</button>
         <button class="start-tool-button" id="record-export-button" type="button" title="Records" aria-label="Records">LOG</button>
       </div>
 
@@ -285,7 +285,7 @@
       </div>
       <div class="start-records">
         <div class="start-records-head">
-          <p class="eyebrow" id="start-records-title">DAY30 RECORDS</p>
+          <p class="eyebrow" id="start-records-title">DAY45 RECORDS</p>
           <span id="day30-record-count">0 RUNS</span>
         </div>
         <div class="day30-record-list" id="day30-record-list"></div>
@@ -397,6 +397,6 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=187"></script>
+  <script src="game.js?v=202"></script>
 </body>
 </html>

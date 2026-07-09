@@ -4,6 +4,7 @@ let CROPS = {};
 let MARKETS = {};
 let MARKET_SIGNALS = {};
 let CROP_MARKET_RESPONSE = {};
+let MARKET_SUPPLY_EFFECTS = {};
 let BASE_TAGS = {};
 let EQUIPMENT_TAGS = {};
 let CROP_ENVIRONMENT = {};
@@ -40,7 +41,7 @@ const WITHER_DAYS = 1;
 const SAVE_KEY = "undergreen-save-v17";
 const SAVE_BACKUP_KEY = `${SAVE_KEY}-backup`;
 const LEGACY_SAVE_KEYS = [];
-const DAY30_RECORDS_KEY = "undergreen-day30-records-v1";
+const DAY45_RECORDS_KEY = "undergreen-day45-records-v1";
 const DAY60_RECORDS_KEY = "undergreen-day60-records-v1";
 const FREE_RECORDS_KEY = "undergreen-free-records-v1";
 const START_MODE_PREF_KEY = "undergreen-start-mode-view-v1";
@@ -48,25 +49,25 @@ const PUBLIC_GAME_URL = "https://ziroz-tech.github.io/UnderGreen/";
 const GOOGLE_FORM_PREFILL_URL = "https://docs.google.com/forms/d/1DhYFy45WvRujbb3CzGxlMpZXWnAe5eZFt62CczIPxqk/viewform?usp=pp_url";
 const GOOGLE_FORM_FIELDS = {
   recordJson: "entry.1523070449",
-  day30Count: "",
+  day45Count: "",
   day60Count: "",
   freeCount: "",
   latestRevenue: "",
   latestTitles: ""
 };
 const PLAY_MODES = {
-  day30: {
-    key: "day30",
-    label: "DAY30モード",
-    shortLabel: "DAY30",
-    recordsTitle: "DAY30 RECORDS",
-    recordEmpty: "まだDAY30モードの記録はありません。",
-    storageKey: DAY30_RECORDS_KEY,
-    limit: 30,
-    startKicker: "DAY30 CHALLENGE",
-    startTitle: "DAY30モード",
-    startCopy: "現在のセーブデータを上書きして、DAY30終了時点の記録を残す競技モードを開始します。",
-    startConfirm: "DAY30開始"
+  day45: {
+    key: "day45",
+    label: "DAY45モード",
+    shortLabel: "DAY45",
+    recordsTitle: "DAY45 RECORDS",
+    recordEmpty: "まだDAY45モードの記録はありません。",
+    storageKey: DAY45_RECORDS_KEY,
+    limit: 45,
+    startKicker: "DAY45 CHALLENGE",
+    startTitle: "DAY45モード",
+    startCopy: "現在のセーブデータを上書きして、DAY45終了時点の記録を残す競技モードを開始します。",
+    startConfirm: "DAY45開始"
   },
   day60: {
     key: "day60",
@@ -95,7 +96,7 @@ const PLAY_MODES = {
     startConfirm: "フリー開始"
   }
 };
-const START_MODE_SEQUENCE = ["day30", "day60", "free"];
+const START_MODE_SEQUENCE = ["day45", "day60", "free"];
 const PROPERTY_REROLL_FEE = 100;
 const PROCUREMENT_REROLL_FEE = 80;
 const SHOP_CATEGORIES = {
@@ -143,6 +144,8 @@ const UI_SCALE_BASE_HEIGHT = 1060;
 const UI_SCALE_MAX = 1.45;
 const SPRITE_ALPHA_THRESHOLD = 18;
 const BOOT_ASSET_TIMEOUT_MS = 20000;
+const TOUCH_WEBKIT_BOOT_HIDE_MS = 1200;
+const DEFAULT_BOOT_HIDE_MS = 2400;
 const AUDIO_CACHE_BUSTER = Date.now().toString(36);
 const spriteAlphaCache = new Map();
 let state;
@@ -188,7 +191,7 @@ let pendingDangerAction = null;
 let pendingExtraAction = null;
 let pausedBeforeStartScreen = false;
 let pendingDay30RecordId = null;
-let startModeView = "day30";
+let startModeView = "day45";
 let startTitleTapCount = 0;
 let startTitleTapAt = 0;
 let startLaunchPending = false;
@@ -293,14 +296,17 @@ function fullscreenElement() {
 }
 
 function updateFullscreenButton() {
-  const button = document.getElementById("fullscreen-button");
-  if (!button) return;
+  const buttons = document.querySelectorAll("#fullscreen-button");
+  if (!buttons.length) return;
   const active = Boolean(fullscreenElement());
-  button.classList.toggle("fullscreen-active", active);
-  button.setAttribute("aria-pressed", active ? "true" : "false");
-  button.textContent = active ? "WIN" : "FS";
-  button.title = active ? "Window mode" : "Fullscreen mode";
-  button.setAttribute("aria-label", button.title);
+  const title = active ? "Window mode" : "Fullscreen mode";
+  buttons.forEach((button) => {
+    button.classList.toggle("fullscreen-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.textContent = active ? "WIN" : "FULL";
+    button.title = title;
+    button.setAttribute("aria-label", title);
+  });
 }
 
 async function toggleFullscreenMode() {
@@ -313,14 +319,14 @@ async function toggleFullscreenMode() {
     } else {
       const request = target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
       if (!request) {
-        toast("Fullscreen is not available in this browser.", "warning");
+        toast("このブラウザではフルスクリーン切替を利用できません。", "warning");
         return;
       }
       await request.call(target);
     }
   } catch (error) {
     console.warn(error);
-    toast("Fullscreen request was blocked.", "warning");
+    toast("フルスクリーン切替がブラウザにブロックされました。", "warning");
   } finally {
     updateFullscreenButton();
     window.setTimeout(applyUiScale, 80);
@@ -330,6 +336,16 @@ async function toggleFullscreenMode() {
 const SCHEDULE_DAYS = 30;
 const SCHEDULE_REROLL_COST = 120;
 const SCHEDULE_NON_TARGET_SIGNAL_CAP = 0.42;
+const MARKET_SIGNAL_MIN = 0.05;
+const MARKET_SIGNAL_MAX = 0.95;
+const MARKET_SIGNAL_START_MIN = 0.38;
+const MARKET_SIGNAL_START_MAX = 0.68;
+const MARKET_SIGNAL_NATURAL_DRIFT = 0.028;
+const MARKET_SIGNAL_NATURAL_CAP = 0.86;
+const MARKET_EVENT_DEFAULT_RECOVERY_DAYS = 4;
+const MARKET_EVENT_OFFSET_EPSILON = 0.004;
+const MARKET_SUPPLY_EFFECT_EXPONENT = 0.68;
+const MARKET_SUPPLY_EFFECT_MAX_DELTA = 0.12;
 const SUPPORT_ROBOT_DEFAULT_RANGE = 2;
 const SUPPORT_ROBOT_MIN_ENERGY = 8;
 const SUPPORT_ROBOT_MAX_ENERGY = 100;
@@ -579,9 +595,22 @@ async function loadExternalData() {
         axisAWeight: toNumber(row.axisAWeight),
         axisBWeight: toNumber(row.axisBWeight),
         synergy: toNumber(row.synergy),
+        synergyMode: row.synergyMode || "highHigh",
         minMultiplier: toNumber(row.minMultiplier, 0.65),
         maxMultiplier: toNumber(row.maxMultiplier, 1.75),
         note: row.note
+      };
+      return entries;
+    }, {});
+  });
+  await loadRequiredCsv("data/market_supply_effects.csv", (rows) => {
+    MARKET_SUPPLY_EFFECTS = rows.reduce((entries, row) => {
+      if (!row.marketId || !row.cropId) return entries;
+      entries[row.marketId] ||= {};
+      entries[row.marketId][row.cropId] = {
+        axisAEffect: toNumber(row.axisAEffect, 0),
+        axisBEffect: toNumber(row.axisBEffect, 0),
+        note: row.note || ""
       };
       return entries;
     }, {});
@@ -599,6 +628,8 @@ async function loadExternalData() {
       chance: toNumber(row.chance, row.type === "rare" ? 0.45 : 1),
       jitter: toNumber(row.jitter, row.type === "rare" ? 2 : 0),
       signalBoost: toNumber(row.signalBoost, 0),
+      signalDelta: toNumber(row.signalDelta, null),
+      recoveryDays: toNumber(row.recoveryDays, MARKET_EVENT_DEFAULT_RECOVERY_DAYS),
       priceBoost: toNumber(row.priceBoost, 0),
       title: row.title,
       rumor: row.rumor,
@@ -881,7 +912,8 @@ function setBootLoadingProgress(done, total, label = "素材を読み込んで�
 
 function hideBootLoading() {
   const overlay = document.getElementById("boot-loading");
-  if (!overlay) return;
+  if (!overlay || overlay.dataset.hiding === "true") return;
+  overlay.dataset.hiding = "true";
   overlay.classList.add("hidden");
   window.setTimeout(() => overlay.remove(), 420);
 }
@@ -974,6 +1006,36 @@ async function preloadBootAssets() {
   await Promise.all(Array.from({ length: workerCount }, preloadNext));
   window.BOOT_ASSET_FAILURES = failures;
   if (failures.length) console.warn("Boot image preload completed with missing assets", failures);
+}
+function isLikelyTouchWebKitBrowser() {
+  const nav = window.navigator || {};
+  const ua = nav.userAgent || "";
+  const platform = nav.platform || "";
+  return /iP(ad|hone|od)/i.test(ua) || (platform === "MacIntel" && Number(nav.maxTouchPoints || 0) > 1);
+}
+
+function preloadBootAssetsAfterInteractive() {
+  let preloadFinished = false;
+  let overlayHidden = false;
+  const safetyDelay = isLikelyTouchWebKitBrowser() ? TOUCH_WEBKIT_BOOT_HIDE_MS : DEFAULT_BOOT_HIDE_MS;
+  const revealGame = () => {
+    if (overlayHidden) return;
+    overlayHidden = true;
+    if (!preloadFinished) {
+      setBootLoadingProgress(1, 1, "操作可能です。画像素材はバックグラウンドで確認しています...");
+    }
+    hideBootLoading();
+  };
+  const safetyTimer = window.setTimeout(revealGame, safetyDelay);
+  preloadBootAssets()
+    .catch((error) => {
+      console.warn("Boot image preload failed after the game became interactive", error);
+    })
+    .finally(() => {
+      preloadFinished = true;
+      window.clearTimeout(safetyTimer);
+      revealGame();
+    });
 }
 function applyUiText(rows) {
   rows.forEach((row) => {
@@ -1366,7 +1428,7 @@ function createDefaultSupportAutomation() {
   };
 }
 
-function createInitialState(mode = "normal") {
+function createInitialState(mode = "day45") {
   const initialProperty = createInitialSafeRoom();
   initialProperty.ownedAt = Date.now();
   const initialPod = createStarterPod();
@@ -1398,6 +1460,7 @@ function createInitialState(mode = "normal") {
     timeUnlocked: false,
     marketFluctuation: {},
     marketSignals: {},
+    marketEventOffsets: [],
     marketEventQueue: [],
     monthlySchedule: generateMonthlySchedule(),
     nextMarketForecastDay: 3,
@@ -1695,19 +1758,14 @@ function activeMarketSchedule() {
   );
 }
 
-function updateMarketForDay() {
+function updateMarketForDay(options = {}) {
   ensureMarketNewsState();
   Object.keys(CROPS).forEach((cropId) => {
     state.marketFluctuation[cropId] = randomBetween(0.94, 1.06);
   });
-  state.marketSignals = {};
-  Object.entries(MARKET_SIGNALS).forEach(([marketId, profile]) => {
-    state.marketSignals[marketId] = {
-      [profile.axisA]: randomBetween(0.18, 0.94),
-      [profile.axisB]: randomBetween(0.18, 0.94)
-    };
-  });
-  applyScheduleMarketSignals();
+  ensureMarketSignalsState();
+  if (options.drift) driftMarketSignalsForDay();
+  updateMarketEventOffsets();
 
   state.marketEventQueue = state.marketEventQueue.filter((schedule) =>
     marketEventById(schedule.eventId) && state.day < schedule.endDay + 2
@@ -1931,8 +1989,8 @@ function saveGame() {
   return saved;
 }
 
-function playModeConfig(mode = "day30") {
-  return PLAY_MODES[mode] || PLAY_MODES.day30;
+function playModeConfig(mode = "day45") {
+  return PLAY_MODES[mode] || PLAY_MODES.day45;
 }
 
 function playModeLimit(mode = state?.mode) {
@@ -1957,15 +2015,15 @@ function playModeShortLabel(mode = state?.mode) {
   return PLAY_MODES[mode]?.shortLabel || "NORMAL";
 }
 
-function validPlayMode(mode, fallback = "day30") {
+function validPlayMode(mode, fallback = "day45") {
   return PLAY_MODES[mode] ? mode : fallback;
 }
 
-function recordStorageKey(mode = "day30") {
+function recordStorageKey(mode = "day45") {
   return playModeConfig(mode).storageKey;
 }
 
-function readPlayRecords(mode = "day30") {
+function readPlayRecords(mode = "day45") {
   try {
     const raw = safeStorageGet(recordStorageKey(mode));
     const records = raw ? JSON.parse(raw) : [];
@@ -1975,12 +2033,12 @@ function readPlayRecords(mode = "day30") {
   }
 }
 
-function savePlayRecords(mode = "day30", records = []) {
+function savePlayRecords(mode = "day45", records = []) {
   safeStorageSet(recordStorageKey(mode), JSON.stringify(records.slice(0, 50)));
 }
 
 function readDay30Records() {
-  return readPlayRecords("day30");
+  return readPlayRecords("day45");
 }
 
 function readDay60Records() {
@@ -1992,7 +2050,7 @@ function readFreeRecords() {
 }
 
 function saveDay30Records(records) {
-  savePlayRecords("day30", records);
+  savePlayRecords("day45", records);
 }
 
 function saveDay60Records(records) {
@@ -2053,7 +2111,7 @@ function loadGame() {
   state.storyChoices ||= {};
   state.storyOpen ||= [];
   state.unlocks ||= {};
-  state.mode ||= "normal";
+  state.mode = validPlayMode(state.mode || "day45", "day45");
   state.debugMode = Boolean(state.debugMode);
   state.day30Recorded = Boolean(state.day30Recorded);
   state.day30RecordId ||= null;
@@ -2072,6 +2130,9 @@ function loadGame() {
   ensureAnalytics();
   state.marketFluctuation ||= {};
   state.marketSignals ||= {};
+  state.marketEventOffsets = Array.isArray(state.marketEventOffsets) ? state.marketEventOffsets : [];
+  ensureMarketSignalsState();
+  ensureMarketEventOffsetsState();
   state.audio ||= {};
   state.audio.noiseCanceling = Boolean(state.audio.noiseCanceling);
   ensureSupportAutomationState();
@@ -2466,7 +2527,10 @@ function preferredSupportRobotPosition(base, item) {
 }
 
 function hasCompletedCommsTrigger(trigger) {
-  return COMM_EVENTS.some((event) => event.trigger === trigger && state.commsChoices?.[event.id]);
+  const commCompleted = COMM_EVENTS.some((event) => event.trigger === trigger && state.commsChoices?.[event.id]);
+  const storyCompleted = STORY_EVENTS.some((event) => event.trigger === trigger && state.storyChoices?.[event.id]);
+  const legacyCompleted = trigger === "first_place" && Boolean(state.commsChoices?.first_place_v4);
+  return commCompleted || storyCompleted || legacyCompleted;
 }
 
 function grantFloorDevice(type) {
@@ -2654,18 +2718,179 @@ function isMarketSpecialty(cropId, marketId) {
   return cropPrimaryMarket(cropId) === marketId;
 }
 
+function marketAxes(marketId) {
+  const profile = MARKET_SIGNALS[marketId];
+  return profile ? [profile.axisA, profile.axisB].filter(Boolean) : [];
+}
+
+function ensureMarketSignalsState() {
+  state.marketSignals ||= {};
+  Object.entries(MARKET_SIGNALS).forEach(([marketId, profile]) => {
+    state.marketSignals[marketId] ||= {};
+    marketAxes(marketId).forEach((axis) => {
+      const value = Number(state.marketSignals[marketId][axis]);
+      state.marketSignals[marketId][axis] = Number.isFinite(value)
+        ? clamp(value, MARKET_SIGNAL_MIN, MARKET_SIGNAL_MAX)
+        : randomBetween(MARKET_SIGNAL_START_MIN, MARKET_SIGNAL_START_MAX);
+    });
+  });
+}
+
+function ensureMarketEventOffsetsState() {
+  state.marketEventOffsets = Array.isArray(state.marketEventOffsets) ? state.marketEventOffsets : [];
+  state.marketEventOffsets = state.marketEventOffsets
+    .map((offset) => ({
+      key: String(offset.key || ""),
+      groupKey: String(offset.groupKey || offset.key || ""),
+      eventId: String(offset.eventId || ""),
+      marketId: String(offset.marketId || ""),
+      axis: String(offset.axis || ""),
+      cropIds: Array.isArray(offset.cropIds) ? offset.cropIds : toList(offset.cropIds),
+      signalDelta: toNumber(offset.signalDelta, 0),
+      currentDelta: toNumber(offset.currentDelta, 0),
+      recoveryDays: Math.max(1, Math.round(toNumber(offset.recoveryDays, MARKET_EVENT_DEFAULT_RECOVERY_DAYS))),
+      priceBoost: Math.max(1, toNumber(offset.priceBoost, 1)),
+      endDay: Math.max(1, Math.round(toNumber(offset.endDay, Number(state.day) || 1)))
+    }))
+    .filter((offset) => offset.key && offset.marketId && offset.axis && Math.abs(offset.currentDelta) > MARKET_EVENT_OFFSET_EPSILON);
+}
+
+function driftMarketSignalsForDay() {
+  ensureMarketSignalsState();
+  Object.entries(MARKET_SIGNALS).forEach(([marketId]) => {
+    marketAxes(marketId).forEach((axis) => {
+      const current = Number(state.marketSignals[marketId][axis]) || 0.5;
+      state.marketSignals[marketId][axis] = clamp(
+        current < MARKET_SIGNAL_NATURAL_CAP ? current + MARKET_SIGNAL_NATURAL_DRIFT : current,
+        MARKET_SIGNAL_MIN,
+        MARKET_SIGNAL_MAX
+      );
+    });
+  });
+}
+
+function scheduleEntryAbsoluteRange(entry, day = Number(state.day) || 1) {
+  const cycle = Math.floor((Math.max(1, Math.round(day)) - 1) / SCHEDULE_DAYS);
+  const startDay = cycle * SCHEDULE_DAYS + scheduleClampDay(entry.startDay);
+  const endDay = startDay + Math.max(1, Math.round(Number(entry.duration) || 1)) - 1;
+  return { cycle, startDay, endDay };
+}
+
+function scheduleSignalDelta(entry) {
+  const hasExplicit = entry.signalDelta !== undefined && entry.signalDelta !== null && String(entry.signalDelta).trim() !== "";
+  const explicit = hasExplicit ? Number(entry.signalDelta) : NaN;
+  if (Number.isFinite(explicit)) return clamp(explicit, -0.65, 0.65);
+  const boost = Number(entry.signalBoost);
+  if (Number.isFinite(boost) && boost > 0) return clamp((boost - 0.5) * 0.7, -0.45, 0.45);
+  if (entry.strength === "rare") return 0.3;
+  if (entry.strength === "high") return 0.26;
+  return 0.22;
+}
+
+function eventOffsetKey(entry, range, axis) {
+  return [range.startDay, entry.id, entry.marketId, axis].join(":");
+}
+
+function updateMarketEventOffsets(day = Number(state.day) || 1) {
+  ensureMarketEventOffsetsState();
+  const offsets = new Map(state.marketEventOffsets.map((offset) => [offset.key, offset]));
+  const activeKeys = new Set();
+  ensureMonthlyScheduleBasics(state.monthlySchedule || []).forEach((entry) => {
+    const range = scheduleEntryAbsoluteRange(entry, day);
+    if (day < range.startDay || day > range.endDay) return;
+    const signalDelta = scheduleSignalDelta(entry);
+    const recoveryDays = Math.max(1, Math.round(toNumber(entry.recoveryDays, MARKET_EVENT_DEFAULT_RECOVERY_DAYS)));
+    const priceBoost = Math.max(1, toNumber(entry.priceBoost, 1));
+    const cropIds = scheduleCropIds(entry);
+    const groupKey = [range.startDay, entry.id, entry.marketId].join(":");
+    scheduleAxisList(entry).forEach((axis) => {
+      if (!axis) return;
+      const key = eventOffsetKey(entry, range, axis);
+      activeKeys.add(key);
+      offsets.set(key, {
+        key,
+        groupKey,
+        eventId: entry.id,
+        marketId: entry.marketId,
+        axis,
+        cropIds,
+        signalDelta,
+        currentDelta: signalDelta,
+        recoveryDays,
+        priceBoost,
+        endDay: range.endDay
+      });
+    });
+  });
+
+  offsets.forEach((offset, key) => {
+    if (activeKeys.has(key)) return;
+    const current = Number(offset.currentDelta) || 0;
+    const baseDelta = Number(offset.signalDelta) || current;
+    const step = Math.abs(baseDelta) / Math.max(1, Number(offset.recoveryDays) || MARKET_EVENT_DEFAULT_RECOVERY_DAYS);
+    if (current > 0) offset.currentDelta = Math.max(0, current - step);
+    else if (current < 0) offset.currentDelta = Math.min(0, current + step);
+  });
+
+  state.marketEventOffsets = Array.from(offsets.values())
+    .filter((offset) => Math.abs(Number(offset.currentDelta) || 0) > MARKET_EVENT_OFFSET_EPSILON);
+}
+
+function marketSignalOffsetValue(marketId, axis) {
+  ensureMarketEventOffsetsState();
+  return state.marketEventOffsets
+    .filter((offset) => offset.marketId === marketId && offset.axis === axis)
+    .reduce((sum, offset) => sum + (Number(offset.currentDelta) || 0), 0);
+}
+
+function marketSignalValue(marketId, axis) {
+  ensureMarketSignalsState();
+  const base = Number(state.marketSignals?.[marketId]?.[axis]);
+  return clamp((Number.isFinite(base) ? base : 0.5) + marketSignalOffsetValue(marketId, axis), MARKET_SIGNAL_MIN, MARKET_SIGNAL_MAX);
+}
+
+function eventOffsetStrength(offset) {
+  const signalDelta = Math.abs(Number(offset.signalDelta) || 0);
+  const currentDelta = Math.abs(Number(offset.currentDelta) || 0);
+  return signalDelta > 0 ? clamp(currentDelta / signalDelta, 0, 1) : clamp(currentDelta, 0, 1);
+}
+
+function applyMarketSupplyEffect(cropId, marketId, qty = 1) {
+  const profile = MARKET_SIGNALS[marketId];
+  const effect = MARKET_SUPPLY_EFFECTS[marketId]?.[cropId];
+  if (!profile || !effect) return null;
+  ensureMarketSignalsState();
+  const marketSignals = state.marketSignals[marketId];
+  const rawAmount = Math.max(1, Number(qty) || 1);
+  const amount = Math.pow(rawAmount, MARKET_SUPPLY_EFFECT_EXPONENT);
+  const changes = [];
+  [
+    [profile.axisA, effect.axisAEffect],
+    [profile.axisB, effect.axisBEffect]
+  ].forEach(([axis, perUnit]) => {
+    if (!axis || !Number.isFinite(Number(perUnit)) || Number(perUnit) === 0) return;
+    const before = Number(marketSignals[axis]) || 0.5;
+    const delta = clamp(Number(perUnit) * amount, -MARKET_SUPPLY_EFFECT_MAX_DELTA, MARKET_SUPPLY_EFFECT_MAX_DELTA);
+    const after = clamp(before + delta, MARKET_SIGNAL_MIN, MARKET_SIGNAL_MAX);
+    marketSignals[axis] = after;
+    changes.push({ axis, before, after, delta: after - before });
+  });
+  return changes.length ? changes : null;
+}
+
 function cropDemandMultiplier(cropId, marketId = selectedMarket) {
   const profile = MARKET_SIGNALS[marketId];
   const response = CROP_MARKET_RESPONSE[marketId]?.[cropId];
   if (!profile || !response || !isMarketSpecialty(cropId, marketId)) return 1;
-  const signals = state.marketSignals?.[marketId] || {};
-  const axisA = signals[profile.axisA] ?? 0.5;
-  const axisB = signals[profile.axisB] ?? 0.5;
+  const axisA = marketSignalValue(marketId, profile.axisA);
+  const axisB = marketSignalValue(marketId, profile.axisB);
   const sharedHigh = Math.max(0, Math.min(axisA, axisB) - 0.5) * 2;
+  const sharedLow = Math.max(0, 0.5 - Math.max(axisA, axisB)) * 2;
+  const shared = response.synergyMode === "lowLow" ? sharedLow : sharedHigh;
   const multiplier = 1
     + (axisA - 0.5) * response.axisAWeight
     + (axisB - 0.5) * response.axisBWeight
-    + sharedHigh * response.synergy;
+    + shared * response.synergy;
   return clamp(multiplier, response.minMultiplier, response.maxMultiplier);
 }
 
@@ -2775,9 +3000,21 @@ function schedulePriceBoost(entry) {
 }
 
 function scheduleCropEventMultiplier(cropId, marketId = selectedMarket) {
-  return activeScheduleEntries()
-    .filter((entry) => entry.marketId === marketId && scheduleCropIds(entry).includes(cropId))
-    .reduce((multiplier, entry) => Math.max(multiplier, schedulePriceBoost(entry)), 1);
+  ensureMarketEventOffsetsState();
+  const groups = new Map();
+  state.marketEventOffsets.forEach((offset) => {
+    if (offset.marketId !== marketId || !offset.cropIds.includes(cropId)) return;
+    const strength = eventOffsetStrength(offset);
+    const current = groups.get(offset.groupKey) || { strength: 0, priceBoost: 1 };
+    current.strength = Math.max(current.strength, strength);
+    current.priceBoost = Math.max(current.priceBoost, Number(offset.priceBoost) || 1);
+    groups.set(offset.groupKey, current);
+  });
+  let multiplier = 1;
+  groups.forEach((entry) => {
+    multiplier = Math.max(multiplier, 1 + (entry.priceBoost - 1) * entry.strength);
+  });
+  return multiplier;
 }
 
 function activeScheduleEntries(day = state.day) {
@@ -2785,30 +3022,8 @@ function activeScheduleEntries(day = state.day) {
 }
 
 function applyScheduleMarketSignals() {
-  const activeEntries = activeScheduleEntries();
-  const targetedAxesByMarket = new Map();
-  activeEntries.forEach((entry) => {
-    const signals = state.marketSignals?.[entry.marketId];
-    if (!signals) return;
-    const boost = scheduleSignalBoost(entry);
-    const targetedAxes = targetedAxesByMarket.get(entry.marketId) || new Set();
-    scheduleAxisList(entry).forEach((axis) => {
-      if (!axis || !(axis in signals)) return;
-      targetedAxes.add(axis);
-      signals[axis] = clamp(Math.max(Number(signals[axis]) || 0, boost), 0, 0.98);
-    });
-    targetedAxesByMarket.set(entry.marketId, targetedAxes);
-  });
-
-  targetedAxesByMarket.forEach((targetedAxes, marketId) => {
-    const profile = MARKET_SIGNALS[marketId];
-    const signals = state.marketSignals?.[marketId];
-    if (!profile || !signals) return;
-    [profile.axisA, profile.axisB].forEach((axis) => {
-      if (!axis || targetedAxes.has(axis) || !(axis in signals)) return;
-      signals[axis] = clamp(Math.min(Number(signals[axis]) || 0, SCHEDULE_NON_TARGET_SIGNAL_CAP), 0, 1);
-    });
-  });
+  ensureMarketSignalsState();
+  updateMarketEventOffsets();
 }
 
 function scheduleAxisList(entry) {
@@ -3533,7 +3748,7 @@ function saleRewardEffect({ sourceElement, sourceRect, cropId, revenue, qty, qua
     animateMoneyCounter(fromMoney, toMoney);
     pulseElement(document.getElementById("money-value"), premium ? "cash-shock-premium" : "cash-shock");
   }, 120);
-  if (premium) window.setTimeout(() => toast((CROPS[cropId]?.name || cropId) + " ???? // Q-" + quality), 180);
+  if (premium) window.setTimeout(() => toast((CROPS[cropId]?.name || cropId) + " Sランク // Q-" + quality), 180);
 }
 
 function plantGrowthFeedback(target, plant) {
@@ -3648,6 +3863,39 @@ function switchTab(tabId) {
     trackTabAnalytics(tabId, previousTab);
     terminalSurfaceFeedback(tabId);
   }
+}
+
+function activeTabId() {
+  return document.querySelector(".screen.active")?.id?.replace("-screen", "") || "farm";
+}
+
+function setActiveTabSilently(tabId = "farm") {
+  const safeTabId = GAME_TABS.includes(tabId) ? tabId : "farm";
+  document.querySelectorAll(".tab[data-tab]").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.tab === safeTabId);
+  });
+  document.querySelectorAll(".screen").forEach((screen) => {
+    screen.classList.toggle("active", screen.id === `${safeTabId}-screen`);
+  });
+}
+
+function resetOperationSurface({ resetAudio = false } = {}) {
+  selectedSeed = "lettuce";
+  selectedMarket = "lower";
+  selectedShopCategory = "seeds";
+  selectedInfoBookId = "gardening_intro";
+  selectedInfoEntryId = "";
+  setActiveTabSilently("farm");
+  if (resetAudio && state?.audio) {
+    state.audio.noiseCanceling = false;
+    state.audio.radioProgram = "off";
+  }
+  if (state?.audio) syncLoopAudio();
+}
+
+function ensureActiveTabAvailable() {
+  const tabId = activeTabId();
+  if (!GAME_TABS.includes(tabId) || !isTabAvailable(tabId)) setActiveTabSilently("farm");
 }
 
 function commsContextValue(context = {}, key = "") {
@@ -4245,7 +4493,7 @@ function day30Titles(summary) {
 }
 
 function createDay30Summary(options = {}) {
-  const recordMode = validPlayMode(options.mode || state.mode || "day30");
+  const recordMode = validPlayMode(options.mode || state.mode || "day45");
   const modeConfig = playModeConfig(recordMode);
   const modeLimit = playModeLimit(recordMode);
   const byCrop = { ...(state.tradeStats?.byCrop || {}) };
@@ -5175,7 +5423,7 @@ function plantSeed(shelfIndex, slotIndex, cropId = selectedSeed, sourceElement =
   if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) {
     const shortageContext = resourceShortageContext(cropId, unit, plantingCost);
     trackPlantingFailure(plantingShortageReason(shortageContext), shortageContext);
-    toast(`????: ${shortageContext.missingResources}`, "warning");
+    toast(`資源不足: ${shortageContext.missingResources}`, "warning");
     triggerComms("plant_resource_shortage", shortageContext);
     rejectFeedback();
     return;
@@ -5614,6 +5862,7 @@ function sellBatch(batchId) {
     if (CROPS[batch.crop].category === "weapon") state.tradeStats.weaponsToRebels += revenue;
     else if (CROPS[batch.crop].category === "food") state.tradeStats.foodToRebels += revenue;
   }
+  applyMarketSupplyEffect(batch.crop, selectedMarket, qty);
   if (batch.qty <= 0) {
     state.inventory = state.inventory.filter((item) => item.id !== batchId);
     delete saleQuantities[batchId];
@@ -5963,6 +6212,7 @@ function sellInventoryByRobot(cropId, marketId) {
     if (CROPS[cropId]?.category === "weapon") state.tradeStats.weaponsToRebels += totalQty;
     else state.tradeStats.foodToRebels += totalQty;
   }
+  applyMarketSupplyEffect(cropId, marketId, totalQty);
 
   const cropName = CROPS[cropId]?.name || cropId;
   const marketName = MARKETS[marketId]?.name || marketId;
@@ -6319,7 +6569,7 @@ function processDayBoundary() {
     state.paused = true;
     showEndReport();
   } else {
-    updateMarketForDay();
+    updateMarketForDay({ drift: true });
     setStatus(`DAY ${state.day} 開始：維持費 ₡${upkeep}を支払いました。`);
     toast(`DAY ${String(state.day).padStart(2, "0")} 開始`);
     if (state.mode === "normal" && state.day > 30 && !state.prototypeReportShown) {
@@ -6336,8 +6586,11 @@ function processDayBoundary() {
 
 function realtimeTick() {
   const now = Date.now();
-  const elapsedMs = Math.min(1000, now - lastTickAt);
+  const elapsedMs = Math.min(1000, Math.max(0, now - lastTickAt));
   lastTickAt = now;
+  const dayProgressValue = Number(state.dayProgress);
+  state.dayProgress = Number.isFinite(dayProgressValue) ? Math.max(0, dayProgressValue) : 0;
+  if (state.dayProgress > 3) state.dayProgress %= 1;
   if (startScreenOpen || isCommsBlocking()) {
     if (now - lastRenderAt >= 500) {
       renderRuntime();
@@ -6369,9 +6622,15 @@ function realtimeTick() {
     return;
   }
   state.dayProgress += deltaDays;
-  while (state.dayProgress >= 1 && !state.ended) {
+  let dayBoundaryGuard = 0;
+  while (state.dayProgress >= 1 && !state.ended && dayBoundaryGuard < 3) {
     state.dayProgress -= 1;
+    dayBoundaryGuard += 1;
     processDayBoundary();
+  }
+  if (dayBoundaryGuard >= 3 && state.dayProgress >= 1) {
+    state.dayProgress %= 1;
+    console.warn('Day progress guard clamped excessive progress.');
   }
 
   if (now - lastRenderAt >= 350) {
@@ -6438,7 +6697,7 @@ function finalizeDay30Run({ completed = false, playedDays = state.day, mode = st
     mode,
     id: state.day30RecordId || undefined
   });
-  setStartModeView(validPlayMode(summary.mode, "day30"));
+  setStartModeView(validPlayMode(summary.mode, "day45"));
   pendingDay30RecordId = summary.id;
   showDay30Report(summary);
   saveGame();
@@ -6474,7 +6733,7 @@ function currentResultSummary() {
   applyDay30PlayerName();
   return currentDay30Record() || createDay30Summary({
     id: pendingDay30RecordId || undefined,
-    mode: state.mode || "day30",
+    mode: state.mode || "day45",
     completed: state.ended,
     playedDays: Math.min(playModeLimit(state.mode), state.day),
     playerName: currentDay30PlayerName()
@@ -6504,12 +6763,75 @@ function latestPlayRecordForExport() {
     .sort((a, b) => String(b.recordedAt || "").localeCompare(String(a.recordedAt || "")))[0] || null;
 }
 
+const GOOGLE_FORM_RECORD_MAX_CHARS = 1800;
+
+function compactMapSummary(values = {}, labeler = (value) => value) {
+  return Object.entries(values)
+    .filter(([, value]) => Number(value) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 5)
+    .map(([key, value]) => `${labeler(key)}:${formatNumber(value)}`)
+    .join(" / ") || "-";
+}
+
+function compactTimelineSummary(record = {}) {
+  const timeline = record.analytics?.timeline || {};
+  const keys = [
+    "firstPlant",
+    "firstHarvest",
+    "firstSale",
+    "firstPurchase:unit:pod",
+    "firstPurchase:unit:box",
+    "firstPurchase:property",
+    "firstPurchase:device:support_robot"
+  ];
+  return keys
+    .map((key) => [key, timeline[key]])
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}=DAY${value.day ?? "?"}`)
+    .join(" / ") || "-";
+}
+
+function compactRecordForGoogleForm(record) {
+  if (!record) return "LATEST: -";
+  const lines = [
+    `[${record.runLabel || record.id || "RUN"}] ${record.modeLabel || record.mode || "MODE"}`,
+    `player=${record.playerName || "未記名"} / day=${record.day || 0}${record.completed ? " / completed" : " / unfinished"}`,
+    `money=C${formatNumber(record.money || 0)} / revenue=C${formatNumber(record.revenue || 0)} / units=${formatNumber(record.unitsSold || 0)} / avg=C${formatNumber(record.averageUnitPrice || 0)}`,
+    `topCrop=${cropLabel(record.topCropId)} x${formatNumber(record.topCropQty || 0)} / topMarketRevenue=${marketLabel(record.topMarketRevenueId)} C${formatNumber(record.topMarketRevenue || 0)} / topMarketQty=${marketLabel(record.topMarketQtyId)} x${formatNumber(record.topMarketQty || 0)}`,
+    `equipment=${formatNumber(record.equipmentCount || 0)} / property=${formatNumber(record.propertyCount || 0)} / elapsed=${formatNumber(record.analytics?.elapsedSec || 0)}sec`,
+    `crops=${compactMapSummary(record.byCrop, cropLabel)}`,
+    `markets(amount)=${compactMapSummary(record.byMarket, marketLabel)}`,
+    `markets(qty)=${compactMapSummary(record.byMarketQty, marketLabel)}`,
+    `titles=${record.titles?.length ? record.titles.join(" / ") : "-"}`,
+    `timeline=${compactTimelineSummary(record)}`
+  ];
+  return lines.join("\n");
+}
+
+function truncateGoogleFormText(text) {
+  if (text.length <= GOOGLE_FORM_RECORD_MAX_CHARS) return text;
+  const suffix = "\n...trimmed for Google Form URL. Full JSON is available from LOG > COPY.";
+  return text.slice(0, Math.max(0, GOOGLE_FORM_RECORD_MAX_CHARS - suffix.length)) + suffix;
+}
+
+function googleFormRecordText(records, latest) {
+  const header = [
+    "UNDERGREEN PLAY LOG",
+    `exportedAt=${records.exportedAt}`,
+    `records day45=${records.records.day45.length} / day60=${records.records.day60.length} / free=${records.records.free.length}`,
+    "",
+    compactRecordForGoogleForm(latest)
+  ].join("\n");
+  return truncateGoogleFormText(header);
+}
+
 function googleFormExportPayload() {
   const records = playRecordsExportPayload();
   const latest = latestPlayRecordForExport();
   return {
-    recordJson: JSON.stringify(records),
-    day30Count: String(records.records.day30.length),
+    recordJson: googleFormRecordText(records, latest),
+    day45Count: String(records.records.day45.length),
     day60Count: String(records.records.day60.length),
     freeCount: String(records.records.free.length),
     latestRevenue: latest ? String(latest.revenue || 0) : "0",
@@ -6615,6 +6937,7 @@ function clearSessionInteractionState() {
   pendingComms = [];
   activeStory = null;
   pendingStories = [];
+  resetOperationSurface({ resetAudio: true });
 }
 
 function hasStartProgress() {
@@ -6716,7 +7039,7 @@ function handleStartTitleTap() {
   startTitleTapCount = 0;
   startDebugGame();
 }
-function startNewGame(mode = "normal") {
+function startNewGame(mode = "day45") {
   clearSessionInteractionState();
   state = createInitialState(mode);
   updateMarketForDay();
@@ -6738,7 +7061,7 @@ function startNewGame(mode = "normal") {
 }
 
 function startDay30Game() {
-  startNewGame("day30");
+  startNewGame("day45");
 }
 
 function startDay60Game() {
@@ -6754,7 +7077,7 @@ function selectedStartModeLabel() {
 }
 
 function setStartModeView(mode) {
-  startModeView = validPlayMode(mode, "day30");
+  startModeView = validPlayMode(mode, "day45");
   safeStorageSet(START_MODE_PREF_KEY, startModeView);
   updateStartScreen();
 }
@@ -6775,6 +7098,7 @@ function openStartScreen(options = {}) {
   clearEquipmentMenu();
   clearCleanToolDrag();
   removeUiGuideHighlights();
+  resetOperationSurface({ resetAudio: true });
   document.getElementById("modal-backdrop")?.classList.add("hidden");
   document.getElementById("comms-banner")?.classList.add("hidden");
   document.getElementById("news-history-panel")?.classList.add("hidden");
@@ -6959,7 +7283,7 @@ function requestTimedModeGame(mode = startModeView) {
 }
 
 function requestDay30Game() {
-  requestTimedModeGame("day30");
+  requestTimedModeGame("day45");
 }
 
 function requestSelectedModeGame() {
@@ -6981,7 +7305,7 @@ function playRecordsExportPayload() {
     app: "UNDERGREEN",
     exportedAt: new Date().toISOString(),
     records: {
-      day30: readDay30Records(),
+      day45: readDay30Records(),
       day60: readDay60Records(),
       free: readFreeRecords()
     }
@@ -7066,7 +7390,7 @@ function requestClearPlayRecords() {
   openConfirmWidget({
     kicker: "DELETE RECORDS",
     title: "記録消去",
-    copy: "この端末に保存されているDAY30/DAY60/フリーモードのプレイレコードをすべて消去します。",
+    copy: "この端末に保存されているDAY45/DAY60/フリーモードのプレイレコードをすべて消去します。",
     confirmText: "消去",
     onConfirm: clearPlayRecords
   });
@@ -7076,7 +7400,7 @@ function requestRecordExport() {
   openConfirmWidget({
     kicker: "RECORD EXPORT",
     title: "記録書き出し",
-    copy: "この端末に保存されているDAY30/DAY60/フリーモードのプレイレコードをコピー、または消去できます。",
+    copy: "この端末に保存されているDAY45/DAY60/フリーモードのプレイレコードをコピー、または消去できます。",
     confirmText: "コピー",
     onConfirm: copyPlayRecordsToClipboard
   });
@@ -7166,7 +7490,8 @@ function renderHeader() {
   document.getElementById("upkeep-value").textContent = dailyUpkeep();
   document.getElementById("slot-value").textContent = totalGrowSlots();
   document.getElementById("news-text").textContent = state.news;
-  document.getElementById("news-effect").textContent = state.newsLabel;
+  const newsEffect = document.getElementById("news-effect");
+  if (newsEffect) newsEffect.textContent = state.newsLabel;
   const status = document.getElementById("status-text");
   if (status) status.textContent = state.log;
   document.getElementById("day-progress-fill").style.width = state.timeUnlocked ? `${Math.min(100, state.dayProgress * 100)}%` : "0%";
@@ -7542,7 +7867,7 @@ function renderMarkets(direction = "") {
   document.getElementById("market-signal-row").innerHTML = signalProfile ? [signalProfile.axisA, signalProfile.axisB].map((axis, index) => {
     const label = index === 0 ? signalProfile.axisALabel : signalProfile.axisBLabel;
     const description = index === 0 ? signalProfile.axisADescription : signalProfile.axisBDescription;
-    const value = clamp(signals[axis] ?? 0.5, 0, 1);
+    const value = marketSignalValue(selectedMarket, axis);
     return `<div class="market-signal">
       <span>${label}</span>
       <strong>${Math.round(value * 100)}%</strong>
@@ -7939,6 +8264,7 @@ function renderInfo() {
   `;
 }
 function render() {
+  ensureActiveTabAvailable();
   const cleaningNeeded = ownedBases().some((base) => [...base.shelves, ...base.floorDevices].some(needsCleaning));
   document.querySelector('[data-tab="farm"]')?.classList.toggle("needs-cleaning-tab", cleaningNeeded);
   document.querySelector('[data-tab="market"]')?.classList.toggle("locked", !state.marketTabUnlocked);
@@ -7964,6 +8290,7 @@ function render() {
 }
 
 function renderRuntime() {
+  ensureActiveTabAvailable();
   updateTabIndicators();
 renderHeader();
   if (farmRenderRequested) {
@@ -8770,8 +9097,8 @@ function clearDragState() {
 async function bootstrap() {
   setBootLoadingProgress(0, 1, "CSVデータを読み込んでいます...");
   await loadExternalData();
-  await preloadBootAssets();
-  startModeView = validPlayMode(safeStorageGet(START_MODE_PREF_KEY), "day30");
+  setBootLoadingProgress(1, 1, "画面を準備しています...");
+  startModeView = validPlayMode(safeStorageGet(START_MODE_PREF_KEY), "day45");
   loadGame();
   applyUiScale();
   bindEvents();
@@ -8780,11 +9107,12 @@ async function bootstrap() {
   render();
   pushLogEntry(state.log, "status", { duration: 5200 });
   openStartScreen({ persist: false });
-  hideBootLoading();
+  preloadBootAssetsAfterInteractive();
   window.setInterval(realtimeTick, 200);
 }
 
 function showBootstrapError(error) {
+  hideBootLoading();
   console.error(error);
   const isFile = window.location.protocol === "file:";
   const message = isFile
