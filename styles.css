@@ -41,6 +41,28 @@ body {
     linear-gradient(180deg, #07100d 0%, #040705 100%);
 }
 
+
+html.apple-touch-device body {
+  zoom: normal !important;
+  touch-action: auto;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html.apple-touch-device button,
+html.apple-touch-device [role="button"],
+html.apple-touch-device .start-screen,
+html.apple-touch-device .start-primary-hit,
+html.apple-touch-device .start-title-hotspot {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.apple-touch-device .start-primary-hit,
+html.apple-touch-device .start-title-hotspot {
+  pointer-events: auto;
+}
 body::before {
   content: "";
   position: fixed;

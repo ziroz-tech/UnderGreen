@@ -229,6 +229,11 @@ function isAppleTouchDevice() {
     || (platform === "MacIntel" && Number(navigator.maxTouchPoints) > 1);
 }
 
+const APPLE_TOUCH_DEVICE = isAppleTouchDevice();
+if (APPLE_TOUCH_DEVICE) {
+  document.documentElement.classList.add("apple-touch-device");
+}
+
 function inputDiagnosticElementLabel(element) {
   if (!element) return "-";
   if (element === window) return "window";
@@ -297,6 +302,8 @@ function renderInputDiagnosticPanel() {
     `maxTouch=${navigator.maxTouchPoints || 0}`,
     `platform=${navigator.platform || "-"}`
   ].join(" ");
+  const bodyStyle = document.body ? window.getComputedStyle(document.body) : null;
+  const htmlClass = document.documentElement.className || "-";
   const layers = [
     inputDiagnosticLayerLine("boot-loading"),
     inputDiagnosticLayerLine("start-screen"),
@@ -315,6 +322,7 @@ function renderInputDiagnosticPanel() {
     `flags bind=${inputDiagnosticState.bindEventsReached} render=${inputDiagnosticState.renderReached} start=${inputDiagnosticState.startScreenReached} bootHidden=${inputDiagnosticState.bootOverlayHidden}`,
     `viewport=${viewport} inner=${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio || 1}`,
     support,
+    `appleTouch=${APPLE_TOUCH_DEVICE} htmlClass=${htmlClass} bodyZoom=${bodyStyle?.zoom || "-"}`,
     `lastInput=${inputDiagnosticState.lastInput}`,
     `lastTop=${inputDiagnosticState.lastTopElement}`,
     assetFailures,
@@ -361,6 +369,11 @@ function initInputDiagnostics() {
   ["touchstart", "touchend", "touchcancel", "pointerdown", "pointerup", "pointercancel", "click"].forEach((type) => {
     diagnosticTargets.forEach((target) => {
       target.addEventListener(type, inputDiagnosticRecordInput, { capture: true, passive: true });
+    });
+  });
+  ["ontouchstart", "ontouchend", "onpointerdown", "onpointerup", "onclick"].forEach((property) => {
+    diagnosticTargets.forEach((target) => {
+      if (!target[property]) target[property] = inputDiagnosticRecordInput;
     });
   });
   window.addEventListener("error", (event) => {
@@ -449,6 +462,7 @@ function clearUiGuideTargets(targets, options = {}) {
 }
 
 function preferredUiScale() {
+  if (APPLE_TOUCH_DEVICE) return 1;
   const width = window.innerWidth || document.documentElement.clientWidth || 0;
   const height = window.innerHeight || document.documentElement.clientHeight || 0;
   if (width < 1800 || height < 940) return 1;
@@ -459,9 +473,11 @@ function preferredUiScale() {
 function applyUiScale() {
   const scale = preferredUiScale();
   currentUiScale = scale;
+  if (APPLE_TOUCH_DEVICE) document.documentElement.classList.add("apple-touch-device");
   document.documentElement.style.setProperty("--ui-scale", scale.toFixed(2));
   document.body?.classList.toggle("ui-scale-large", scale > 1.01);
   document.body?.setAttribute("data-ui-scale", scale.toFixed(2));
+  if (APPLE_TOUCH_DEVICE && document.body) document.body.style.zoom = "normal";
 }
 
 function fullscreenElement() {
@@ -7245,6 +7261,42 @@ function handleStartTitleTap() {
   startTitleTapCount = 0;
   startDebugGame();
 }
+
+let lastAppleTouchStartActionAt = 0;
+
+function handleAppleTouchStartAction(event, action) {
+  if (!APPLE_TOUCH_DEVICE) return;
+  const now = Date.now();
+  if (now - lastAppleTouchStartActionAt < 280) return;
+  lastAppleTouchStartActionAt = now;
+  inputDiagnosticRecordInput(event);
+  event.preventDefault();
+  event.stopPropagation();
+  action();
+}
+
+function bindAppleTouchStartControl(id, action) {
+  const element = document.getElementById(id);
+  if (!element || element.dataset.appleTouchBound === "true") return;
+  element.dataset.appleTouchBound = "true";
+  element.addEventListener("touchend", (event) => handleAppleTouchStartAction(event, action), { passive: false });
+  element.addEventListener("pointerup", (event) => {
+    if (event.pointerType === "mouse") return;
+    handleAppleTouchStartAction(event, action);
+  }, { passive: false });
+}
+
+function bindAppleTouchStartControls() {
+  if (!APPLE_TOUCH_DEVICE) return;
+  bindAppleTouchStartControl("start-continue", handleStartPrimary);
+  bindAppleTouchStartControl("start-day30", requestSelectedModeGame);
+  bindAppleTouchStartControl("start-new", handleStartContinue);
+  bindAppleTouchStartControl("start-mode-toggle", toggleStartModeView);
+  bindAppleTouchStartControl("fullscreen-button", toggleFullscreenMode);
+  bindAppleTouchStartControl("record-export-button", requestRecordExport);
+  bindAppleTouchStartControl("start-title", handleStartTitleTap);
+}
+
 function startNewGame(mode = "day45") {
   clearSessionInteractionState();
   state = createInitialState(mode);
@@ -9238,6 +9290,7 @@ function bindEvents() {
   document.getElementById("start-new").addEventListener("click", handleStartContinue);
   document.getElementById("start-mode-toggle").addEventListener("click", toggleStartModeView);
   document.getElementById("start-title")?.addEventListener("click", handleStartTitleTap);
+  bindAppleTouchStartControls();
   document.getElementById("record-export-button").addEventListener("click", requestRecordExport);
   document.getElementById("confirm-cancel").addEventListener("click", closeConfirmWidget);
   document.getElementById("confirm-ok").addEventListener("click", confirmWidgetAction);
