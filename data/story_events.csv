@@ -1,2 +1,8 @@
 id,trigger,layout,kicker,title,background,choices,once,priority,blocking,requirements,context,sound,soundVolume,effects
 episode0_first_illegal_procurement,game_start,duel,,,assets/storyboard/steam_pv/shot07_comms_choice.png,ok=LINK CLOSE,TRUE,200,TRUE,,,comms_open,0.18,choice:*->comms:game_start
+story_market_medical_unlocked,market_medical_unlocked,duel,,,assets/storyboard/steam_pv/shot07_comms_choice.png,open=市場を見る|close=閉じる,TRUE,176,TRUE,,unlockType=market|marketId=medical,comms_open,0.18,choice:open->tab:market
+story_property_broker_unlocked,property_broker_unlocked,duel,,,assets/storyboard/steam_pv/shot07_comms_choice.png,open=物件を見る|close=閉じる,TRUE,175,TRUE,,unlockType=broker,comms_open,0.18,choice:open->tab:broker
+story_market_upper_unlocked,market_upper_unlocked,duel,,,assets/storyboard/steam_pv/shot07_comms_choice.png,open=市場を見る|close=閉じる,TRUE,176,TRUE,,unlockType=market|marketId=upper,comms_open,0.18,choice:open->tab:market
+story_market_rebel_unlocked,market_rebel_unlocked,duel,,,assets/storyboard/steam_pv/shot07_comms_choice.png,open=市場を見る|close=閉じる,TRUE,176,TRUE,,unlockType=market|marketId=rebel,comms_open,0.18,choice:open->tab:market
+story_lower_market_first_leaf,first_harvest,duel,,,assets/storyboard/steam_pv/shot07_comms_choice.png,lower=下層に回す,TRUE,178,TRUE,,cropId=lettuce,comms_open,0.18,choice:lower->tab:market|choice:lower->guide:sell-lettuce
+story_first_place_floor_lock_v1,first_place,duel,LAYOUT ASSIST,,assets/storyboard/steam_pv/shot07_comms_choice.png,ok=確認|return=返品を検討する,TRUE,94,TRUE,,,comms_open,0.18,choice:*->add_device:support_robot|choice:*->guide:seed-lettuce
