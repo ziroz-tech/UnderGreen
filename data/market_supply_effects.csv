@@ -1,0 +1,14 @@
+marketId,cropId,axisAEffect,axisBEffect,note
+lower,lettuce,-0.012,0.006,fills hunger and raises nutrition needs
+lower,spinach,0,-0.012,fills nutrition needs
+lower,basil,-0.004,-0.004,comfort crop for satisfied lower market
+lower,tomato,-0.005,-0.005,comfort crop for satisfied lower market
+medical,rosemary,-0.012,0.005,treatment supply shifts pressure toward care
+medical,chamomile,0,-0.012,care supply reduces care needs
+upper,melon,-0.011,0.005,novelty supply shifts attention to presentation
+upper,strawberry,0,-0.011,presentation supply cools presentation needs
+upper,tomato,-0.004,-0.004,comfort crop for satisfied upper market
+rebel,lettuce,-0.008,0.004,food supply relieves supply pressure
+rebel,spinach,-0.008,0.004,nutrition supply relieves supply pressure
+rebel,basil,-0.004,-0.004,morale supply when pressure is calm
+rebel,aconite,0,-0.011,disruption material supply reduces disruption demand
