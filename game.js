@@ -144,8 +144,6 @@ const UI_SCALE_BASE_HEIGHT = 1060;
 const UI_SCALE_MAX = 1.45;
 const SPRITE_ALPHA_THRESHOLD = 18;
 const BOOT_ASSET_TIMEOUT_MS = 20000;
-const TOUCH_WEBKIT_BOOT_HIDE_MS = 1200;
-const DEFAULT_BOOT_HIDE_MS = 2400;
 const AUDIO_CACHE_BUSTER = Date.now().toString(36);
 const spriteAlphaCache = new Map();
 let state;
@@ -392,10 +390,68 @@ function parseCsv(text) {
   return body.map((entry) => Object.fromEntries(headers.map((header, index) => [header.trim(), (entry[index] || "").trim()])));
 }
 
+const REQUIRED_GAME_DATA_PATHS = [
+  "data/crops.csv",
+  "data/markets.csv",
+  "data/market_signals.csv",
+  "data/crop_market_response.csv",
+  "data/market_supply_effects.csv",
+  "data/schedule_rumors.csv",
+  "data/plant_sprites.csv",
+  "data/grow_unit_slots.csv",
+  "data/base_tags.csv",
+  "data/equipment_tags.csv",
+  "data/crop_environment.csv",
+  "data/grow_units.csv",
+  "data/floor_devices.csv",
+  "data/support_robot_skills.csv",
+  "data/support_robot_personalities.csv",
+  "data/equipment.csv",
+  "data/unlocks.csv",
+  "data/area_profiles.csv",
+  "data/property_comments.csv",
+  "data/events.csv",
+  "data/quiet_news.csv",
+  "data/audio.csv",
+  "data/ambient_layers.csv",
+  "data/radio_programs.csv",
+  "data/info_books.csv",
+  "data/info_entries.csv",
+  "data/comm_events.csv",
+  "data/story_events.csv",
+  "data/story_event_speakers.csv",
+  "data/story_event_lines.csv",
+  "data/ui_text.csv",
+];
+const csvTextCache = new Map();
+
 async function loadCsv(path) {
-  const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${path}: ${response.status}`);
-  return parseCsv(await response.text());
+  if (!csvTextCache.has(path)) {
+    const response = await fetch(path, { cache: "no-store" });
+    if (!response.ok) throw new Error(`${path}: ${response.status}`);
+    csvTextCache.set(path, await response.text());
+  }
+  return parseCsv(csvTextCache.get(path));
+}
+
+function createGameDataError(failures) {
+  const error = new Error(`${failures.length} required game file(s) could not be loaded`);
+  error.name = "GameDataLoadError";
+  error.failures = failures;
+  return error;
+}
+
+async function verifyRequiredGameData(paths = REQUIRED_GAME_DATA_PATHS) {
+  const failures = [];
+  await Promise.all(paths.map(async (path) => {
+    try {
+      await loadCsv(path);
+    } catch (error) {
+      failures.push({ path, message: error?.message || String(error) });
+    }
+  }));
+  failures.sort((a, b) => a.path.localeCompare(b.path));
+  if (failures.length > 0) throw createGameDataError(failures);
 }
 
 function toNumber(value, fallback = 0) {
@@ -996,7 +1052,7 @@ async function preloadBootAssets() {
       try {
         await preloadImageAsset(url);
       } catch (error) {
-        failures.push({ url, message: error.message });
+        failures.push({ path: url, message: error.message });
         console.warn("Boot image preload skipped", url, error);
       }
       done += 1;
@@ -1005,37 +1061,7 @@ async function preloadBootAssets() {
   }
   await Promise.all(Array.from({ length: workerCount }, preloadNext));
   window.BOOT_ASSET_FAILURES = failures;
-  if (failures.length) console.warn("Boot image preload completed with missing assets", failures);
-}
-function isLikelyTouchWebKitBrowser() {
-  const nav = window.navigator || {};
-  const ua = nav.userAgent || "";
-  const platform = nav.platform || "";
-  return /iP(ad|hone|od)/i.test(ua) || (platform === "MacIntel" && Number(nav.maxTouchPoints || 0) > 1);
-}
-
-function preloadBootAssetsAfterInteractive() {
-  let preloadFinished = false;
-  let overlayHidden = false;
-  const safetyDelay = isLikelyTouchWebKitBrowser() ? TOUCH_WEBKIT_BOOT_HIDE_MS : DEFAULT_BOOT_HIDE_MS;
-  const revealGame = () => {
-    if (overlayHidden) return;
-    overlayHidden = true;
-    if (!preloadFinished) {
-      setBootLoadingProgress(1, 1, "操作可能です。画像素材はバックグラウンドで確認しています...");
-    }
-    hideBootLoading();
-  };
-  const safetyTimer = window.setTimeout(revealGame, safetyDelay);
-  preloadBootAssets()
-    .catch((error) => {
-      console.warn("Boot image preload failed after the game became interactive", error);
-    })
-    .finally(() => {
-      preloadFinished = true;
-      window.clearTimeout(safetyTimer);
-      revealGame();
-    });
+  if (failures.length) throw createGameDataError(failures);
 }
 function applyUiText(rows) {
   rows.forEach((row) => {
@@ -9095,8 +9121,10 @@ function clearDragState() {
 }
 
 async function bootstrap() {
-  setBootLoadingProgress(0, 1, "CSVデータを読み込んでいます...");
+  setBootLoadingProgress(0, REQUIRED_GAME_DATA_PATHS.length, "CSVデータを読み込んでいます...");
+  await verifyRequiredGameData();
   await loadExternalData();
+  await preloadBootAssets();
   setBootLoadingProgress(1, 1, "画面を準備しています...");
   startModeView = validPlayMode(safeStorageGet(START_MODE_PREF_KEY), "day45");
   loadGame();
@@ -9107,17 +9135,29 @@ async function bootstrap() {
   render();
   pushLogEntry(state.log, "status", { duration: 5200 });
   openStartScreen({ persist: false });
-  preloadBootAssetsAfterInteractive();
+  hideBootLoading();
   window.setInterval(realtimeTick, 200);
+}
+
+function missingDataListHtml(error) {
+  const failures = Array.isArray(error?.failures) ? error.failures : [];
+  if (failures.length === 0) return "";
+  const items = failures.map((failure) => (
+    `<li><code>${escapeHtml(failure.path)}</code><small>${escapeHtml(failure.message)}</small></li>`
+  )).join("");
+  return `<div class="modal-copy"><strong>Missing required files</strong></div><ul class="modal-copy boot-error-list">${items}</ul>`;
 }
 
 function showBootstrapError(error) {
   hideBootLoading();
   console.error(error);
   const isFile = window.location.protocol === "file:";
+  const failures = Array.isArray(error?.failures) ? error.failures : [];
   const message = isFile
     ? "Direct file launch cannot load the CSV data in Chrome. Start a local server and open http://127.0.0.1:8766/index.html."
-    : `Game data failed to load: ${error.message}`;
+    : failures.length > 0
+      ? `${failures.length} required game file(s) could not be loaded.`
+      : `Game data failed to load: ${error.message}`;
   const status = document.getElementById("status-text");
   if (status) status.textContent = message;
   const news = document.getElementById("news-text");
@@ -9126,8 +9166,22 @@ function showBootstrapError(error) {
   if (modal) {
     document.getElementById("modal-kicker").textContent = "BOOT ERROR";
     document.getElementById("modal-title").textContent = "Game data could not be loaded";
-    document.getElementById("modal-content").innerHTML = `<p class="modal-copy">${message}</p>`;
-    document.getElementById("modal-close").style.display = "";
+    const content = [`<p class="modal-copy">${escapeHtml(message)}</p>`, missingDataListHtml(error)].filter(Boolean).join("");
+    document.getElementById("modal-content").innerHTML = content;
+    const closeButton = document.getElementById("modal-close");
+    const reloadButton = document.getElementById("modal-reset");
+    if (closeButton) {
+      closeButton.hidden = false;
+      closeButton.style.display = "";
+      closeButton.textContent = "\u9589\u3058\u308b";
+      closeButton.onclick = () => modal.classList.add("hidden");
+    }
+    if (reloadButton) {
+      reloadButton.hidden = false;
+      reloadButton.style.display = "";
+      reloadButton.textContent = "\u518d\u8aad\u307f\u8fbc\u307f";
+      reloadButton.onclick = () => window.location.reload();
+    }
     modal.classList.remove("hidden");
   }
 }
