@@ -99,6 +99,8 @@ const PLAY_MODES = {
 const START_MODE_SEQUENCE = ["day45", "day60", "free"];
 const PROPERTY_REROLL_FEE = 100;
 const PROCUREMENT_REROLL_FEE = 80;
+const AUTOMATION_CATEGORY_UNLOCK_REVENUE = 1500;
+const PRE_RESULT_STORY_ID = "story_pre_result_robot_interview";
 const SHOP_CATEGORIES = {
   seeds: {
     label: "種子",
@@ -153,6 +155,13 @@ let selectedShopCategory = "seeds";
 let selectedInfoBookId = "gardening_intro";
 let selectedInfoEntryId = "";
 let saleQuantities = {};
+let pendingSaleSaveTimer = null;
+let pendingSaleRenderTimer = null;
+let saleBurstActiveUntil = 0;
+let lastInventoryRenderSignature = "";
+const SALE_SAVE_IDLE_MS = 240;
+const SALE_RENDER_IDLE_MS = 700;
+const SALE_POINTER_GUARD_MS = 900;
 let selectedUnitId = null;
 let selectedDeviceId = null;
 let selectedBaseId = null;
@@ -206,8 +215,7 @@ const INPUT_DIAGNOSTIC_PARAM = (() => {
     return null;
   }
 })();
-const INPUT_DIAGNOSTIC_ENABLED = INPUT_DIAGNOSTIC_PARAM === "1"
-  || (INPUT_DIAGNOSTIC_PARAM !== "0" && isAppleTouchDevice());
+const INPUT_DIAGNOSTIC_ENABLED = INPUT_DIAGNOSTIC_PARAM === "1";
 const inputDiagnosticState = {
   enabled: INPUT_DIAGNOSTIC_ENABLED,
   bootStage: "script-loaded",
@@ -1700,9 +1708,17 @@ function createInitialState(mode = "day45") {
       foodToRebels: 0,
       weaponsToRebels: 0
     },
+    titleTracking: {
+      started: false,
+      startedAtRevenue: null,
+      byCropBaseline: {},
+      byMarketBaseline: {},
+      byMarketQtyBaseline: {}
+    },
     analytics: defaultAnalytics(),
     marketUnlocked: { lower: true, medical: false, upper: false, rebel: false },
     marketTabUnlocked: false,
+    automationTabUnlocked: false,
     shopUnlocked: false,
     brokerUnlocked: false,
     commsSeen: {},
@@ -1728,6 +1744,7 @@ function createInitialState(mode = "day45") {
     supportRobotGranted: false,
     ended: false,
     resultShown: false,
+    pendingDay30Result: null,
     log: text("log_initial", "System online. Place the grow pod Mara sent you.")
   };
 }
@@ -2058,9 +2075,68 @@ function canSellCropToMarket(cropId, marketId) {
   return isMarketAvailable(marketId) && canMarketAcceptCrop(cropId, marketId);
 }
 
+function normalizedStatRecord(source = {}) {
+  return Object.fromEntries(Object.entries(source || {}).map(([key, value]) => [key, Math.max(0, Number(value) || 0)]));
+}
+
+function emptyMarketStatRecord() {
+  return Object.fromEntries(Object.keys(MARKETS).map((marketId) => [marketId, 0]));
+}
+
+function ensureTitleTrackingState() {
+  const source = state.titleTracking && typeof state.titleTracking === "object" ? state.titleTracking : {};
+  const started = Boolean(source.started);
+  state.titleTracking = {
+    started,
+    startedAtRevenue: started ? Math.max(0, Number(source.startedAtRevenue) || 0) : null,
+    byCropBaseline: normalizedStatRecord(source.byCropBaseline),
+    byMarketBaseline: { ...emptyMarketStatRecord(), ...normalizedStatRecord(source.byMarketBaseline) },
+    byMarketQtyBaseline: { ...emptyMarketStatRecord(), ...normalizedStatRecord(source.byMarketQtyBaseline) }
+  };
+  return state.titleTracking;
+}
+
+function allMarketsUnlocked() {
+  const marketIds = Object.keys(MARKETS);
+  return marketIds.length > 0 && marketIds.every((marketId) => Boolean(state.marketUnlocked?.[marketId]));
+}
+
+function startTitleTrackingIfReady() {
+  const tracking = ensureTitleTrackingState();
+  if (tracking.started || !allMarketsUnlocked()) return false;
+  tracking.started = true;
+  tracking.startedAtRevenue = Math.max(0, Number(state.tradeStats?.revenue) || 0);
+  tracking.byCropBaseline = normalizedStatRecord(state.tradeStats?.byCrop);
+  tracking.byMarketBaseline = { ...emptyMarketStatRecord(), ...normalizedStatRecord(state.tradeStats?.byMarket) };
+  tracking.byMarketQtyBaseline = { ...emptyMarketStatRecord(), ...normalizedStatRecord(state.tradeStats?.byMarketQty) };
+  return true;
+}
+
+function statRecordDelta(current = {}, baseline = {}) {
+  const keys = new Set([...Object.keys(current || {}), ...Object.keys(baseline || {})]);
+  return Object.fromEntries(Array.from(keys).map((key) => [
+    key,
+    Math.max(0, (Number(current?.[key]) || 0) - (Number(baseline?.[key]) || 0))
+  ]).filter(([, value]) => value > 0));
+}
+
+function titleStatsSinceAllMarketsUnlocked() {
+  const tracking = ensureTitleTrackingState();
+  if (!tracking.started) {
+    return { byCrop: {}, byMarket: {}, byMarketQty: {}, startedAtRevenue: null };
+  }
+  return {
+    byCrop: statRecordDelta(state.tradeStats?.byCrop, tracking.byCropBaseline),
+    byMarket: statRecordDelta(state.tradeStats?.byMarket, tracking.byMarketBaseline),
+    byMarketQty: statRecordDelta(state.tradeStats?.byMarketQty, tracking.byMarketQtyBaseline),
+    startedAtRevenue: tracking.startedAtRevenue
+  };
+}
+
 function progressionValue(key) {
   if (key === "shopUnlocked") return state.shopUnlocked;
   if (key === "marketTabUnlocked") return state.marketTabUnlocked;
+  if (key === "automationTabUnlocked") return state.automationTabUnlocked;
   if (key === "brokerUnlocked") return state.brokerUnlocked;
   if (key === "timeUnlocked") return state.timeUnlocked;
   if (key === "revenue") return state.tradeStats?.revenue || 0;
@@ -2103,6 +2179,7 @@ function applyUnlock(rule) {
   }
   if (rule.type === "tab" && rule.target === "shop") state.shopUnlocked = true;
   if (rule.type === "tab" && rule.target === "market") state.marketTabUnlocked = true;
+  if (rule.type === "tab" && rule.target === "automation") state.automationTabUnlocked = true;
 }
 
 function updateProgressionUnlocks({ silent = false } = {}) {
@@ -2130,6 +2207,7 @@ function updateProgressionUnlocks({ silent = false } = {}) {
       }
     }
   });
+  startTitleTrackingIfReady();
   if (!silent) {
     unlockedEvents.forEach(({ event, context }) => triggerComms(event, context));
     if (unlockedEvents.length) playSound("unlock_notice", 0.18);
@@ -2352,6 +2430,17 @@ function loadGame() {
   state.tradeStats.eventRevenue ||= 0;
   state.tradeStats.foodToRebels ||= 0;
   state.tradeStats.weaponsToRebels ||= 0;
+  state.marketUnlocked = { lower: true, medical: false, upper: false, rebel: false, ...(state.marketUnlocked || {}) };
+  state.automationTabUnlocked = Boolean(state.automationTabUnlocked);
+  ensureTitleTrackingState();
+  const pendingResult = state.pendingDay30Result;
+  state.pendingDay30Result = pendingResult && typeof pendingResult === "object" ? {
+    completed: Boolean(pendingResult.completed),
+    playedDays: Math.max(1, Number(pendingResult.playedDays) || Number(state.day) || 1),
+    mode: validPlayMode(pendingResult.mode || state.mode || "day45"),
+    interviewComplete: Boolean(pendingResult.interviewComplete)
+  } : null;
+  if (state.pendingDay30Result) state.paused = true;
   ensureAnalytics();
   state.marketFluctuation ||= {};
   state.marketSignals ||= {};
@@ -2373,6 +2462,7 @@ function loadGame() {
   ownedBases();
   ensureProcurementTags();
   state.marketTabUnlocked = Boolean(state.marketTabUnlocked || state.tradeStats?.unitsSold > 0);
+  state.automationTabUnlocked = Boolean(state.automationTabUnlocked || state.unlocks.automation_os_access);
   state.shopUnlocked = Boolean(state.shopUnlocked);
   state.brokerUnlocked = Boolean(state.brokerUnlocked);
   if (state.timeUnlocked === undefined) {
@@ -3922,18 +4012,7 @@ function floatingFeedback(target, textValue, color = "#f5d65b", className = "") 
 function animateMoneyCounter(fromValue, toValue) {
   const element = document.getElementById("money-value");
   if (!element) return;
-  const start = Number(fromValue) || 0;
-  const end = Number(toValue) || 0;
-  const startedAt = performance.now();
-  const duration = 620;
-  const tick = (now) => {
-    const t = Math.min(1, (now - startedAt) / duration);
-    const eased = 1 - Math.pow(1 - t, 3);
-    element.textContent = formatNumber(Math.round(start + (end - start) * eased));
-    if (t < 1) requestAnimationFrame(tick);
-    else element.textContent = formatNumber(end);
-  };
-  requestAnimationFrame(tick);
+  element.textContent = formatNumber(Number(toValue) || 0);
 }
 
 function saleStreamEffect(sourceElement, cropId, qty = 1, premium = false) {
@@ -4219,9 +4298,12 @@ function triggerStoryEvent(trigger, context = {}) {
     state.storySeen[event.id] = Date.now();
     return { event, page: 0, context };
   });
-  if (activeStory) pendingStories.push(...nextEvents);
-  else activeStory = nextEvents.shift();
-  pendingStories.push(...nextEvents);
+  if (activeStory) {
+    pendingStories.push(...nextEvents);
+  } else {
+    activeStory = nextEvents.shift();
+    pendingStories.push(...nextEvents);
+  }
   persistStoryState();
   renderStoryComms();
   playCommsSound(activeStory, "comms_open");
@@ -4475,6 +4557,9 @@ function closeStoryComms(choiceId = "close") {
   if (!activeStory) return;
   const closed = activeStory;
   state.storyChoices[closed.event.id] = choiceId;
+  if (closed.event.id === PRE_RESULT_STORY_ID && state.pendingDay30Result) {
+    state.pendingDay30Result.interviewComplete = true;
+  }
   pendingStories = pendingStories.filter(storyEntryStillValid);
   activeStory = pendingStories.shift() || null;
   persistStoryState();
@@ -4482,6 +4567,7 @@ function closeStoryComms(choiceId = "close") {
   applyStoryEffects(closed.event, choiceId, closed.context || {});
   if (activeStory) playCommsSound(activeStory, "comms_next");
   saveGame();
+  completePendingDay30ResultIfReady();
 }
 
 function clearStoryForTrigger(trigger) {
@@ -4699,18 +4785,21 @@ function cropLabel(cropId) {
 
 function day30Titles(summary) {
   const titles = [];
-  if (summary.topMarketRevenueId === "upper" && summary.topMarketQtyId === "lower") titles.push("義賊");
+  const topCropId = summary.titleTopCropId || null;
+  const topMarketRevenueId = summary.titleTopMarketRevenueId || null;
+  const topMarketQtyId = summary.titleTopMarketQtyId || null;
+  if (topMarketRevenueId === "upper" && topMarketQtyId === "lower") titles.push("義賊");
   if (summary.propertyCount === 1) titles.push("押し入れ農家");
   if (summary.eventRevenue >= 800 && summary.eventRevenue >= summary.revenue * 0.2) titles.push("市場読み");
-  if (summary.topCropId === "lettuce") titles.push("レタスマニア");
-  else if (summary.topCropId) titles.push(`${cropLabel(summary.topCropId)}好き`);
+  if (topCropId === "lettuce") titles.push("レタスマニア");
+  else if (topCropId) titles.push(`${cropLabel(topCropId)}好き`);
   if (summary.unitsSold > 0 && Object.keys(summary.byCrop).filter((cropId) => summary.byCrop[cropId] > 0).every((cropId) => cropId === "lettuce")) {
     titles.push("レタス命");
   }
-  if (summary.topMarketQtyId === "lower") titles.push("庶民の味方");
-  if (summary.topMarketRevenueId === "medical") titles.push("医療区画御用達");
-  if (summary.topMarketRevenueId === "upper") titles.push("金の亡者");
-  if (summary.topMarketRevenueId === "rebel") titles.push("抵抗の補給線");
+  if (topMarketQtyId === "lower") titles.push("庶民の味方");
+  if (topMarketRevenueId === "medical") titles.push("医療区画御用達");
+  if (topMarketRevenueId === "upper") titles.push("金の亡者");
+  if (topMarketRevenueId === "rebel") titles.push("抵抗の補給線");
   if (summary.averageUnitPrice >= 180 && summary.unitsSold >= 6) titles.push("高級志向");
   if (summary.unitsSold >= 24 && summary.averageUnitPrice <= 85) titles.push("薄利多売");
   return [...new Set(titles)];
@@ -4726,6 +4815,10 @@ function createDay30Summary(options = {}) {
   const [topCropId, topCropQty] = topEntry(byCrop);
   const [topMarketRevenueId, topMarketRevenue] = topEntry(byMarket);
   const [topMarketQtyId, topMarketQty] = topEntry(byMarketQty);
+  const titleStats = titleStatsSinceAllMarketsUnlocked();
+  const [titleTopCropId, titleTopCropQty] = topEntry(titleStats.byCrop);
+  const [titleTopMarketRevenueId, titleTopMarketRevenue] = topEntry(titleStats.byMarket);
+  const [titleTopMarketQtyId, titleTopMarketQty] = topEntry(titleStats.byMarketQty);
   const unitsSold = Number(state.tradeStats?.unitsSold) || 0;
   const revenue = Math.round(Number(state.tradeStats?.revenue) || 0);
   const completed = Boolean(options.completed ?? (Number.isFinite(modeLimit) && state.day > modeLimit));
@@ -4755,6 +4848,16 @@ function createDay30Summary(options = {}) {
     topMarketRevenue: Math.round(Number(topMarketRevenue) || 0),
     topMarketQtyId,
     topMarketQty,
+    titleTrackingStartedAtRevenue: titleStats.startedAtRevenue,
+    titleByCrop: titleStats.byCrop,
+    titleByMarket: titleStats.byMarket,
+    titleByMarketQty: titleStats.byMarketQty,
+    titleTopCropId,
+    titleTopCropQty,
+    titleTopMarketRevenueId,
+    titleTopMarketRevenue: Math.round(Number(titleTopMarketRevenue) || 0),
+    titleTopMarketQtyId,
+    titleTopMarketQty,
     equipmentCount: maintainedEquipmentCount(),
     propertyCount: ownedBases().length,
     eventRevenue: Math.round(Number(state.tradeStats?.eventRevenue) || 0),
@@ -6045,6 +6148,240 @@ function buyEquipment(itemId) {
   render();
 }
 
+function inventorySaleQuote(marketId = selectedMarket) {
+  refreshInventoryAges();
+  if (!isMarketAvailable(marketId)) return { marketId, items: [], qty: 0, revenue: 0 };
+  const items = state.inventory.flatMap((batch) => {
+    const qty = Math.max(0, Number(batch.qty) || 0);
+    if (!qty || !canSellCropToMarket(batch.crop, marketId)) return [];
+    if (isInventoryBatchDegraded(batch)) batch.degraded = true;
+    const unitPrice = getUnitPrice(batch, marketId);
+    return [{
+      batchId: batch.id,
+      cropId: batch.crop,
+      qty,
+      unitPrice,
+      revenue: unitPrice * qty
+    }];
+  });
+  return {
+    marketId,
+    items,
+    qty: items.reduce((sum, item) => sum + item.qty, 0),
+    revenue: items.reduce((sum, item) => sum + item.revenue, 0)
+  };
+}
+
+function executeBatchSale(batchId, options = {}) {
+  const marketId = options.marketId || selectedMarket;
+  const batch = state.inventory.find((item) => item.id === batchId);
+  if (!batch || !canSellCropToMarket(batch.crop, marketId)) return null;
+  refreshInventoryAges();
+  const availableQty = Math.max(0, Number(batch.qty) || 0);
+  if (!availableQty) return null;
+  const requestedQty = options.qty ?? saleQuantities[batchId] ?? 1;
+  const qty = Math.max(1, Math.min(availableQty, Number(requestedQty) || 1));
+  const batchAge = inventoryAgeDays(batch);
+  if (isInventoryBatchDegraded(batch)) batch.degraded = true;
+  const unitPrice = Number.isFinite(Number(options.unitPrice))
+    ? Math.max(1, Math.round(Number(options.unitPrice)))
+    : getUnitPrice(batch, marketId);
+  const revenue = unitPrice * qty;
+  const moneyBeforeSale = state.money;
+  const premiumSale = unitPrice >= Math.round((CROPS[batch.crop]?.basePrice || unitPrice) * (batch.quality === "S" ? 1.25 : 1.15));
+
+  batch.qty -= qty;
+  state.money += revenue;
+  state.tradeStats.unitsSold = (Number(state.tradeStats.unitsSold) || 0) + qty;
+  state.tradeStats.revenue = (Number(state.tradeStats.revenue) || 0) + revenue;
+  state.tradeStats.byMarket ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
+  state.tradeStats.byMarket[marketId] = (Number(state.tradeStats.byMarket[marketId]) || 0) + revenue;
+  state.tradeStats.byMarketQty ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
+  state.tradeStats.byMarketQty[marketId] = (Number(state.tradeStats.byMarketQty[marketId]) || 0) + qty;
+  state.tradeStats.byCrop ||= {};
+  state.tradeStats.byCrop[batch.crop] = (Number(state.tradeStats.byCrop[batch.crop]) || 0) + qty;
+  if (state.event) state.tradeStats.eventRevenue = (Number(state.tradeStats.eventRevenue) || 0) + revenue;
+  trackSaleAnalytics(batch, marketId, qty, unitPrice, revenue, premiumSale);
+  if (marketId === "rebel") {
+    if (CROPS[batch.crop].category === "weapon") {
+      state.tradeStats.weaponsToRebels = (Number(state.tradeStats.weaponsToRebels) || 0) + revenue;
+    } else if (CROPS[batch.crop].category === "food") {
+      state.tradeStats.foodToRebels = (Number(state.tradeStats.foodToRebels) || 0) + revenue;
+    }
+  }
+  if (options.applySupply !== false) applyMarketSupplyEffect(batch.crop, marketId, qty);
+  const remainingQty = Math.max(0, Number(batch.qty) || 0);
+  if (!remainingQty) {
+    state.inventory = state.inventory.filter((item) => item.id !== batchId);
+    delete saleQuantities[batchId];
+  }
+
+  return {
+    batchId,
+    cropId: batch.crop,
+    cropName: CROPS[batch.crop]?.name || batch.crop,
+    cropCategory: CROPS[batch.crop]?.category || "",
+    marketId,
+    marketName: MARKETS[marketId]?.name || marketId,
+    qty,
+    unitPrice,
+    revenue,
+    quality: batch.quality,
+    age: batchAge,
+    ageDays: batchAge,
+    aged: batchAge >= 1,
+    premium: premiumSale,
+    remainingQty,
+    fromMoney: moneyBeforeSale,
+    toMoney: state.money
+  };
+}
+
+function aggregateSaleContexts(results) {
+  const grouped = new Map();
+  results.forEach((result) => {
+    const key = `${result.marketId}:${result.cropId}`;
+    const current = grouped.get(key);
+    if (!current) {
+      grouped.set(key, { ...result });
+      return;
+    }
+    current.qty += result.qty;
+    current.revenue += result.revenue;
+    current.age = Math.max(current.age, result.age);
+    current.ageDays = current.age;
+    current.aged = current.aged || result.aged;
+    current.premium = current.premium || result.premium;
+    current.toMoney = result.toMoney;
+  });
+  return Array.from(grouped.values());
+}
+
+function triggerSaleCommsForResults(results) {
+  aggregateSaleContexts(results).forEach((context) => {
+    clearUiGuideTargets([`sell-${context.cropId}`], { persist: false });
+    triggerComms("first_sale", context);
+    if (context.aged) triggerComms("first_aged_sale", context);
+    triggerComms("sale", context);
+    if (context.marketId === "medical" && context.cropCategory === "medical") {
+      triggerComms("medical_specialty_sale", context);
+    }
+  });
+}
+
+function inventoryRowForBatch(batchId) {
+  return Array.from(document.querySelectorAll(".inventory-row[data-inventory-id]"))
+    .find((row) => row.dataset.inventoryId === batchId) || null;
+}
+
+function updateSaleRowAfterTransaction(result) {
+  const row = inventoryRowForBatch(result.batchId);
+  if (!row) return;
+  const batch = state.inventory.find((item) => item.id === result.batchId);
+  const cropQty = row.querySelector(".inventory-crop strong");
+  const qtyValue = row.querySelector(".qty-control span");
+  const qtyButtons = row.querySelectorAll(".qty-control button");
+  const unitValue = row.querySelector(".unit-price-cell strong");
+  const sellButton = row.querySelector(".sell-button");
+
+  if (!batch) {
+    const inventoryList = row.parentElement;
+    const nextInventoryRow = row.nextElementSibling?.matches(".inventory-row") ? row.nextElementSibling : null;
+    const removedRowHeight = row.getBoundingClientRect().height;
+    row.remove();
+    if (inventoryList && nextInventoryRow && removedRowHeight > 0) {
+      const spacer = document.createElement("div");
+      spacer.className = "inventory-sale-spacer";
+      spacer.setAttribute("aria-hidden", "true");
+      spacer.style.height = `${removedRowHeight}px`;
+      spacer.style.pointerEvents = "none";
+      inventoryList.append(spacer);
+    }
+    if (inventoryList && !inventoryList.querySelector(".inventory-row")) {
+      inventoryList.innerHTML = `<div class="inventory-empty">NO HARVEST STOCK // 収穫物はまだありません</div>`;
+    }
+    return;
+  }
+
+  const batchQty = Math.max(0, Number(batch.qty) || 0);
+  const nextQty = Math.max(1, Math.min(batchQty, saleQuantities[batch.id] || 1));
+  const nextUnitPrice = getUnitPrice(batch, result.marketId);
+  if (cropQty) cropQty.textContent = `${result.cropName} x${batchQty}`;
+  if (qtyValue) qtyValue.textContent = String(nextQty);
+  if (qtyButtons[0]) qtyButtons[0].disabled = nextQty <= 1;
+  if (qtyButtons[1]) qtyButtons[1].disabled = nextQty >= batchQty;
+  if (unitValue) unitValue.textContent = `₡${formatNumber(nextUnitPrice)}`;
+  if (sellButton) sellButton.textContent = `C${formatNumber(nextUnitPrice * nextQty)} SELL`;
+}
+
+function scheduleSalePersistence() {
+  if (pendingSaleSaveTimer) window.clearTimeout(pendingSaleSaveTimer);
+  pendingSaleSaveTimer = window.setTimeout(() => {
+    pendingSaleSaveTimer = null;
+    saveGame();
+  }, SALE_SAVE_IDLE_MS);
+}
+
+function flushPendingSalePersistence() {
+  if (!pendingSaleSaveTimer) return;
+  window.clearTimeout(pendingSaleSaveTimer);
+  pendingSaleSaveTimer = null;
+  saveGame();
+}
+
+function scheduleSaleRender(delay = SALE_RENDER_IDLE_MS) {
+  saleBurstActiveUntil = Date.now() + delay;
+  if (pendingSaleRenderTimer) window.clearTimeout(pendingSaleRenderTimer);
+  pendingSaleRenderTimer = window.setTimeout(() => {
+    pendingSaleRenderTimer = null;
+    lastInventoryRenderSignature = "";
+    render();
+  }, delay);
+}
+
+function finishManualSale(results, options = {}) {
+  const validResults = results.filter(Boolean);
+  if (!validResults.length) return;
+  const totalQty = validResults.reduce((sum, result) => sum + result.qty, 0);
+  const totalRevenue = validResults.reduce((sum, result) => sum + result.revenue, 0);
+  const representative = validResults.reduce((best, result) => result.revenue > best.revenue ? result : best);
+  const premiumSale = validResults.some((result) => result.premium);
+  const marketId = representative.marketId;
+  const fromMoney = validResults[0].fromMoney;
+
+  validResults.forEach(updateSaleRowAfterTransaction);
+  updateInventorySummary();
+  updateSellAllButton();
+  animateMoneyCounter(fromMoney, state.money);
+
+  const statusMessage = options.bulk
+    ? `${MARKETS[marketId].name}で在庫${totalQty}個を一括売却。₡${formatNumber(totalRevenue)}を受領。`
+    : `${MARKETS[marketId].name}で${representative.cropName}を${totalQty}個売却。₡${formatNumber(totalRevenue)}を受領。`;
+  setStatus(statusMessage, { log: false });
+  toast(`${options.bulk ? "一括売却成立" : "売却成立"} +₡${formatNumber(totalRevenue)}`);
+  playSoundFirst(["sell_crop", "sale"], premiumSale ? 0.42 : 0.34);
+  hapticFeedback(options.bulk ? [14, 30, 14] : premiumSale ? [12, 34, 12] : 14);
+  burstEffect(options.sourceElement, premiumSale ? "#fff2a8" : "#f5d65b", options.bulk ? 22 : premiumSale ? 14 : 10);
+  saleRewardEffect({
+    sourceElement: options.sourceElement,
+    sourceRect: options.sourceRect,
+    cropId: representative.cropId,
+    revenue: totalRevenue,
+    qty: totalQty,
+    quality: representative.quality,
+    premium: premiumSale,
+    fromMoney,
+    toMoney: state.money
+  });
+
+  scheduleSalePersistence();
+  scheduleSaleRender();
+  window.setTimeout(() => {
+    triggerSaleCommsForResults(validResults);
+    checkFactionProgression();
+  }, 0);
+}
+
 function sellBatch(batchId) {
   const batch = state.inventory.find((item) => item.id === batchId);
   if (!batch) return;
@@ -6060,75 +6397,51 @@ function sellBatch(batchId) {
     rejectFeedback();
     return;
   }
-  refreshInventoryAges();
-  const qty = Math.max(1, Math.min(batch.qty, saleQuantities[batchId] || 1));
-  const batchAge = inventoryAgeDays(batch);
-  if (isInventoryBatchDegraded(batch)) batch.degraded = true;
-  const agedSale = batchAge >= 1;
-  const unitPrice = getUnitPrice(batch);
-  const revenue = unitPrice * qty;
-  const moneyBeforeSale = state.money;
   const saleSourceElement = document.querySelector(`[data-sell-id="${batchId}"]`);
   const saleSourceRect = feedbackRect(saleSourceElement);
-  const premiumSale = unitPrice >= Math.round((CROPS[batch.crop]?.basePrice || unitPrice) * (batch.quality === "S" ? 1.25 : 1.15));
-  batch.qty -= qty;
-  state.money += revenue;
-  state.tradeStats.unitsSold += qty;
-  state.tradeStats.revenue += revenue;
-  state.tradeStats.byMarket[selectedMarket] += revenue;
-  state.tradeStats.byMarketQty ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
-  state.tradeStats.byMarketQty[selectedMarket] = (state.tradeStats.byMarketQty[selectedMarket] || 0) + qty;
-  state.tradeStats.byCrop ||= {};
-  state.tradeStats.byCrop[batch.crop] = (state.tradeStats.byCrop[batch.crop] || 0) + qty;
-  if (state.event) state.tradeStats.eventRevenue = (state.tradeStats.eventRevenue || 0) + revenue;
-  trackSaleAnalytics(batch, selectedMarket, qty, unitPrice, revenue, premiumSale);
-  if (selectedMarket === "rebel") {
-    if (CROPS[batch.crop].category === "weapon") state.tradeStats.weaponsToRebels += revenue;
-    else if (CROPS[batch.crop].category === "food") state.tradeStats.foodToRebels += revenue;
-  }
-  applyMarketSupplyEffect(batch.crop, selectedMarket, qty);
-  if (batch.qty <= 0) {
-    state.inventory = state.inventory.filter((item) => item.id !== batchId);
-    delete saleQuantities[batchId];
-  }
-  setStatus(`${MARKETS[selectedMarket].name}で${CROPS[batch.crop].name}を${qty}個売却。₡${formatNumber(revenue)}を受領。`);
-  toast(`売却成立 +₡${formatNumber(revenue)}`);
-  playSoundFirst(["sell_crop", "sale"], premiumSale ? 0.42 : 0.34);
-  hapticFeedback(premiumSale ? [12, 34, 12] : 14);
-  burstEffect(saleSourceElement, premiumSale ? "#fff2a8" : "#f5d65b", premiumSale ? 28 : 18);
-  const commsContext = {
-    marketId: selectedMarket,
-    marketName: MARKETS[selectedMarket]?.name || selectedMarket,
-    cropId: batch.crop,
-    cropName: CROPS[batch.crop]?.name || batch.crop,
-    cropCategory: CROPS[batch.crop]?.category || "",
-    qty,
-    revenue,
-    quality: batch.quality,
-    age: batchAge,
-    ageDays: batchAge,
-    aged: agedSale
-  };
-  clearUiGuideTargets([`sell-${batch.crop}`], { persist: false });
-  triggerComms("first_sale", commsContext);
-  if (agedSale) triggerComms("first_aged_sale", commsContext);
-  triggerComms("sale", commsContext);
-  if (selectedMarket === "medical" && CROPS[batch.crop].category === "medical") {
-    triggerComms("medical_specialty_sale", commsContext);
-  }
-  checkFactionProgression();
-  saveGame();
-  render();
-  saleRewardEffect({
+  const result = executeBatchSale(batchId);
+  finishManualSale([result], {
     sourceElement: saleSourceElement,
-    sourceRect: saleSourceRect,
-    cropId: batch.crop,
-    revenue,
-    qty,
-    quality: batch.quality,
-    premium: premiumSale,
-    fromMoney: moneyBeforeSale,
-    toMoney: state.money
+    sourceRect: saleSourceRect
+  });
+}
+
+function sellAllInventory(sourceElement) {
+  if (!isMarketAvailable(selectedMarket)) {
+    selectedMarket = "lower";
+    toast("Action unavailable right now.", "warning");
+    rejectFeedback();
+    renderMarkets();
+    return;
+  }
+  const quote = inventorySaleQuote(selectedMarket);
+  if (!quote.items.length) {
+    toast("この市場で売却できる在庫がありません。", "warning");
+    rejectFeedback({ shake: false });
+    return;
+  }
+
+  const sourceRect = feedbackRect(sourceElement);
+  const results = [];
+  const supplyByCrop = {};
+  quote.items.forEach((item) => {
+    const result = executeBatchSale(item.batchId, {
+      marketId: quote.marketId,
+      qty: item.qty,
+      unitPrice: item.unitPrice,
+      applySupply: false
+    });
+    if (!result) return;
+    results.push(result);
+    supplyByCrop[result.cropId] = (supplyByCrop[result.cropId] || 0) + result.qty;
+  });
+  Object.entries(supplyByCrop).forEach(([cropId, qty]) => {
+    applyMarketSupplyEffect(cropId, quote.marketId, qty);
+  });
+  finishManualSale(results, {
+    sourceElement,
+    sourceRect,
+    bulk: true
   });
 }
 
@@ -6912,7 +7225,8 @@ function showEndReport() {
   showModal(kicker, title, `<p class="modal-copy">${copy}</p>${reportMarkup()}`, false);
 }
 
-function finalizeDay30Run({ completed = false, playedDays = state.day, mode = state.mode } = {}) {
+function commitDay30Run({ completed = false, playedDays = state.day, mode = state.mode } = {}) {
+  state.pendingDay30Result = null;
   state.ended = true;
   state.paused = true;
   const summary = recordDay30Run({ completed, playedDays, mode }) || createDay30Summary({
@@ -6924,6 +7238,36 @@ function finalizeDay30Run({ completed = false, playedDays = state.day, mode = st
   setStartModeView(validPlayMode(summary.mode, "day45"));
   pendingDay30RecordId = summary.id;
   showDay30Report(summary);
+  saveGame();
+  render();
+}
+
+function completePendingDay30ResultIfReady() {
+  const pending = state.pendingDay30Result;
+  if (!pending?.interviewComplete || activeStory) return false;
+  commitDay30Run(pending);
+  return true;
+}
+
+function finalizeDay30Run({ completed = false, playedDays = state.day, mode = state.mode } = {}) {
+  if (state.ended || state.pendingDay30Result) return;
+  state.paused = true;
+  state.pendingDay30Result = {
+    completed: Boolean(completed),
+    playedDays: Math.max(1, Number(playedDays) || Number(state.day) || 1),
+    mode: validPlayMode(mode || state.mode || "day45"),
+    interviewComplete: false
+  };
+  const interviewStarted = triggerStoryEvent("pre_result_robot_interview", {
+    completed: Boolean(completed),
+    playedDays: state.pendingDay30Result.playedDays,
+    mode: state.pendingDay30Result.mode
+  });
+  if (!interviewStarted) {
+    state.pendingDay30Result.interviewComplete = true;
+    completePendingDay30ResultIfReady();
+    return;
+  }
   saveGame();
   render();
 }
@@ -7091,6 +7435,486 @@ function openGoogleFormRecordExport() {
   window.open(googleFormPrefillUrl(), "_blank", "noopener,noreferrer");
   toast("Google Form opened.");
 }
+const resultPresentation = (() => {
+  const PARTICLE_LIMIT = 320;
+  const PARTICLE_COLORS = [
+    "113,255,184",
+    "72,219,234",
+    "200,107,255",
+    "255,95,208",
+    "245,214,91"
+  ];
+
+  let canvas = null;
+  let particleContext = null;
+  let particleFrame = 0;
+  let particles = [];
+  let audioContext = null;
+  let activeSequence = null;
+
+  function reducedMotionRequested() {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  }
+
+  function ensureCanvas() {
+    if (canvas?.isConnected && particleContext) return true;
+    canvas = document.getElementById("result-fx-canvas");
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.id = "result-fx-canvas";
+      canvas.setAttribute("aria-hidden", "true");
+      document.body.appendChild(canvas);
+    }
+    particleContext = canvas.getContext("2d");
+    resizeCanvas();
+    return Boolean(particleContext);
+  }
+
+  function resizeCanvas() {
+    if (!canvas || !particleContext) return;
+    const ratio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const width = Math.max(1, window.innerWidth);
+    const height = Math.max(1, window.innerHeight);
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    particleContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  }
+
+  function startParticleLoop() {
+    if (!particleFrame) particleFrame = requestAnimationFrame(drawParticles);
+  }
+
+  function spawnParticle(x, y, options = {}) {
+    if (reducedMotionRequested() || !ensureCanvas()) return;
+    if (particles.length >= PARTICLE_LIMIT) particles.shift();
+
+    const life = options.life || 58;
+    particles.push({
+      x,
+      y,
+      vx: options.vx ?? (Math.random() - 0.5) * 5,
+      vy: options.vy ?? (-2 - Math.random() * 4),
+      gravity: options.gravity ?? 0.11,
+      drag: options.drag ?? 0.992,
+      size: options.size || (2 + Math.random() * 4),
+      life,
+      maxLife: life,
+      rotation: Math.random() * Math.PI,
+      spin: (Math.random() - 0.5) * 0.22,
+      color: options.color || PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)],
+      kind: options.kind || "spark"
+    });
+
+    canvas.classList.add("active");
+    startParticleLoop();
+  }
+
+  function drawParticles() {
+    particleFrame = 0;
+    if (!particleContext || !canvas) return;
+
+    particleContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    particles = particles.filter((particle) => {
+      particle.life -= 1;
+      if (particle.life <= 0) return false;
+
+      particle.vx *= particle.drag;
+      particle.vy = particle.vy * particle.drag + particle.gravity;
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      particle.rotation += particle.spin;
+
+      const alpha = Math.max(0, particle.life / particle.maxLife);
+      particleContext.save();
+      particleContext.globalAlpha = alpha;
+      particleContext.translate(particle.x, particle.y);
+      particleContext.rotate(particle.rotation);
+
+      if (particle.kind === "coin") {
+        particleContext.fillStyle = "rgba(" + particle.color + "," + alpha + ")";
+        particleContext.fillRect(-particle.size, -particle.size * 0.32, particle.size * 2, particle.size * 0.64);
+        particleContext.strokeStyle = "rgba(255,255,220," + alpha + ")";
+        particleContext.lineWidth = 0.8;
+        particleContext.strokeRect(-particle.size, -particle.size * 0.32, particle.size * 2, particle.size * 0.64);
+      } else if (particle.kind === "spore") {
+        particleContext.fillStyle = "rgba(" + particle.color + "," + alpha + ")";
+        particleContext.shadowColor = "rgba(" + particle.color + ",0.8)";
+        particleContext.shadowBlur = 10;
+        particleContext.beginPath();
+        particleContext.arc(0, 0, particle.size, 0, Math.PI * 2);
+        particleContext.fill();
+      } else {
+        particleContext.fillStyle = "rgba(" + particle.color + "," + alpha + ")";
+        particleContext.shadowColor = "rgba(" + particle.color + ",0.9)";
+        particleContext.shadowBlur = 8;
+        particleContext.fillRect(-particle.size * 0.5, -particle.size * 0.5, particle.size, particle.size);
+      }
+
+      particleContext.restore();
+      return true;
+    });
+
+    if (particles.length) {
+      startParticleLoop();
+    } else {
+      canvas.classList.remove("active");
+      particleContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    }
+  }
+
+  function elementCenter(element) {
+    const rect = element?.getBoundingClientRect();
+    if (!rect) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
+    };
+  }
+
+  function burst(element, count = 34, color = null) {
+    const center = elementCenter(element);
+    for (let index = 0; index < count; index += 1) {
+      const angle = (Math.PI * 2 * index) / count + Math.random() * 0.28;
+      const speed = 2.2 + Math.random() * 5.4;
+      spawnParticle(center.x, center.y, {
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 1.2,
+        gravity: 0.08,
+        life: 44 + Math.random() * 38,
+        size: 2 + Math.random() * 4,
+        color: color || undefined
+      });
+    }
+  }
+
+  function coinShower(element) {
+    const center = elementCenter(element);
+    for (let index = 0; index < 42; index += 1) {
+      spawnParticle(center.x + (Math.random() - 0.5) * 210, center.y - 30 - Math.random() * 90, {
+        vx: (Math.random() - 0.5) * 2.8,
+        vy: 0.5 + Math.random() * 2.4,
+        gravity: 0.13,
+        drag: 0.997,
+        life: 78 + Math.random() * 46,
+        size: 3 + Math.random() * 3,
+        color: "245,214,91",
+        kind: "coin"
+      });
+    }
+  }
+
+  function clearParticles() {
+    particles = [];
+    if (particleFrame) cancelAnimationFrame(particleFrame);
+    particleFrame = 0;
+    canvas?.classList.remove("active");
+    particleContext?.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  }
+
+  function ensureAudioContext() {
+    if (audioContext) return audioContext;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    try {
+      audioContext = new AudioContextClass();
+    } catch (error) {
+      audioContext = null;
+    }
+    return audioContext;
+  }
+
+  function primeAudio() {
+    const context = ensureAudioContext();
+    if (context?.state === "suspended") context.resume().catch(() => {});
+  }
+
+  function tone(frequency, duration, type = "sine", volume = 0.035, delay = 0) {
+    const context = ensureAudioContext();
+    if (!context || context.state !== "running") return;
+
+    const start = context.currentTime + delay;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), start + 0.014);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.03);
+  }
+
+  function playTick(index = 0) {
+    tone(420 + index * 42, 0.075, "square", 0.018);
+  }
+
+  function playSlide() {
+    tone(185, 0.11, "sawtooth", 0.018);
+    tone(275, 0.1, "square", 0.014, 0.035);
+  }
+
+  function playCoin() {
+    tone(820, 0.12, "sine", 0.042);
+    tone(1240, 0.18, "sine", 0.032, 0.075);
+  }
+
+  function playStamp() {
+    tone(90, 0.16, "sawtooth", 0.05);
+    tone(54, 0.22, "square", 0.028);
+  }
+
+  function playFanfare() {
+    [392, 523.25, 659.25, 783.99].forEach((frequency, index) => {
+      tone(frequency, 0.48, "triangle", 0.035, index * 0.085);
+    });
+    tone(196, 0.72, "sine", 0.025);
+  }
+
+  function playChord() {
+    [392, 493.88, 587.33, 783.99].forEach((frequency) => {
+      tone(frequency, 0.76, "sine", 0.024);
+    });
+  }
+
+  function clearSequenceTimers(sequence) {
+    sequence.timers.forEach((timer) => window.clearTimeout(timer));
+    sequence.intervals.forEach((timer) => window.clearInterval(timer));
+    sequence.timers.clear();
+    sequence.intervals.clear();
+  }
+
+  function revealLateElement(element) {
+    if (!element) return;
+    element.classList.add("on");
+    element.removeAttribute("aria-hidden");
+    if ("inert" in element) element.inert = false;
+  }
+
+  function concealLateElement(element) {
+    if (!element) return;
+    element.classList.add("fx-late");
+    element.classList.remove("on");
+    element.setAttribute("aria-hidden", "true");
+    if ("inert" in element) element.inert = true;
+  }
+
+  function stop() {
+    if (activeSequence) {
+      clearSequenceTimers(activeSequence);
+      activeSequence.modal.removeEventListener("pointerdown", activeSequence.skip, true);
+      activeSequence.lateElements.forEach(revealLateElement);
+      activeSequence.modal.classList.remove("fx-result", "fx-result-done");
+      activeSequence = null;
+    }
+
+    document.querySelectorAll(".modal.fx-result, .modal.fx-result-done").forEach((modal) => {
+      modal.classList.remove("fx-result", "fx-result-done");
+    });
+    clearParticles();
+  }
+
+  function play(content, summary) {
+    stop();
+    if (!content || reducedMotionRequested()) return;
+
+    const modal = content.closest(".modal");
+    const report = content.querySelector(".modal-report");
+    if (!modal || !report) return;
+
+    const hero = document.createElement("div");
+    hero.className = "fx-result-hero";
+    hero.setAttribute("aria-label", "Operation complete");
+    hero.innerHTML = "<span>OPERATION</span><strong>COMPLETE</strong>";
+    content.prepend(hero);
+
+    const rows = Array.from(report.children);
+    rows.forEach((row) => row.classList.add("fx-stat"));
+
+    const revenueRow = rows[1] || null;
+    const revenueStrong = revenueRow?.querySelector("strong") || null;
+    const revenueDigits = [];
+    if (revenueRow && revenueStrong) {
+      revenueRow.classList.add("fx-revenue-row");
+      revenueStrong.classList.add("fx-revenue");
+      const value = Array.from(revenueStrong.textContent || "");
+      revenueStrong.textContent = "";
+      value.forEach((character) => {
+        const digit = document.createElement("i");
+        digit.className = "fx-digit";
+        digit.textContent = character;
+        revenueStrong.appendChild(digit);
+        revenueDigits.push(digit);
+      });
+    }
+
+    const directCopy = Array.from(content.children).filter((element) => element.classList.contains("modal-copy"));
+    const intro = directCopy[0] || null;
+    const titleLine = directCopy[directCopy.length - 1] || null;
+    const titleBadges = [];
+
+    if (titleLine && titleLine !== intro) {
+      titleLine.classList.add("fx-title-line");
+      titleLine.textContent = "";
+
+      const titleLabel = document.createElement("span");
+      titleLabel.className = "fx-title-label";
+      titleLabel.textContent = "EARNED TITLES";
+      titleLine.appendChild(titleLabel);
+
+      const badgeList = document.createElement("span");
+      badgeList.className = "fx-title-badges";
+      const titles = Array.isArray(summary?.titles) && summary.titles.length ? summary.titles : ["NO TITLE"];
+      titles.forEach((title) => {
+        const badge = document.createElement("strong");
+        badge.className = "fx-title-badge";
+        if (title === "NO TITLE") badge.classList.add("no-title");
+        badge.textContent = title;
+        badgeList.appendChild(badge);
+        titleBadges.push(badge);
+      });
+      titleLine.appendChild(badgeList);
+    }
+
+    const lateElements = [
+      intro,
+      content.querySelector(".day30-name-field"),
+      content.querySelector(".day30-share-actions"),
+      content.querySelector(".day30-result-actions")
+    ].filter(Boolean);
+    lateElements.forEach(concealLateElement);
+
+    modal.classList.add("fx-result");
+    modal.classList.remove("fx-result-done");
+
+    const sequence = {
+      modal,
+      lateElements,
+      timers: new Set(),
+      intervals: new Set(),
+      finished: false,
+      skip: null,
+      finish: null
+    };
+
+    function schedule(callback, delay) {
+      const timer = window.setTimeout(() => {
+        sequence.timers.delete(timer);
+        if (activeSequence === sequence) callback();
+      }, delay);
+      sequence.timers.add(timer);
+      return timer;
+    }
+
+    sequence.finish = () => {
+      if (sequence.finished || activeSequence !== sequence) return;
+      sequence.finished = true;
+      clearSequenceTimers(sequence);
+      sequence.modal.removeEventListener("pointerdown", sequence.skip, true);
+      hero.classList.add("on");
+      rows.forEach((row) => row.classList.add("on"));
+      revenueDigits.forEach((digit) => digit.classList.add("on"));
+      revenueStrong?.classList.add("done");
+      titleBadges.forEach((badge) => badge.classList.add("on"));
+      lateElements.forEach(revealLateElement);
+      modal.classList.add("fx-result-done");
+    };
+
+    sequence.skip = () => sequence.finish();
+    activeSequence = sequence;
+    modal.addEventListener("pointerdown", sequence.skip, true);
+
+    schedule(() => {
+      hero.classList.add("on");
+      playStamp();
+      playFanfare();
+      burst(hero, 52, "245,214,91");
+      schedule(() => burst(hero, 34, "113,255,184"), 210);
+    }, 120);
+
+    let cursor = 720;
+    rows.forEach((row, index) => {
+      schedule(() => {
+        row.classList.add("on");
+        playSlide();
+        const marker = row.querySelector("strong") || row;
+        burst(marker, index === 1 ? 18 : 8, index === 1 ? "245,214,91" : "72,219,234");
+      }, cursor);
+      cursor += 240;
+    });
+
+    cursor += 120;
+    revenueDigits.forEach((digit, index) => {
+      schedule(() => {
+        digit.classList.add("on");
+        if (/\d/.test(digit.textContent || "")) playTick(index % 7);
+      }, cursor);
+      cursor += /\d/.test(digit.textContent || "") ? 130 : 60;
+    });
+
+    schedule(() => {
+      revenueStrong?.classList.add("done");
+      playCoin();
+      if (revenueStrong) coinShower(revenueStrong);
+    }, cursor);
+    cursor += 620;
+
+    titleBadges.forEach((badge) => {
+      schedule(() => {
+        badge.classList.add("on");
+        playStamp();
+        burst(badge, 22, "200,107,255");
+      }, cursor);
+      cursor += 420;
+    });
+
+    cursor += 200;
+    schedule(() => {
+      lateElements.forEach(revealLateElement);
+      playChord();
+      burst(content.querySelector(".day30-result-actions") || modal, 26, "113,255,184");
+
+      let sporeCount = 0;
+      const sporeTimer = window.setInterval(() => {
+        if (activeSequence !== sequence || sporeCount >= 28) {
+          window.clearInterval(sporeTimer);
+          sequence.intervals.delete(sporeTimer);
+          return;
+        }
+        const rect = modal.getBoundingClientRect();
+        spawnParticle(rect.left + Math.random() * rect.width, rect.bottom - 8, {
+          vx: (Math.random() - 0.5) * 0.7,
+          vy: -0.8 - Math.random() * 1.5,
+          gravity: -0.008,
+          drag: 0.998,
+          life: 80 + Math.random() * 55,
+          size: 1.4 + Math.random() * 2.8,
+          color: Math.random() > 0.45 ? "113,255,184" : "200,107,255",
+          kind: "spore"
+        });
+        sporeCount += 1;
+      }, 85);
+      sequence.intervals.add(sporeTimer);
+    }, cursor);
+
+    schedule(sequence.finish, cursor + 2500);
+  }
+
+  document.addEventListener("pointerdown", primeAudio, {
+    once: true,
+    capture: true,
+    passive: true
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) activeSequence?.finish();
+  });
+  window.addEventListener("resize", resizeCanvas, { passive: true });
+
+  return { play, stop };
+})();
 function day30ReportMarkup(summary) {
   const config = playModeConfig(summary.mode);
   const status = summary.completed ? "完走" : "途中終了";
@@ -7121,8 +7945,10 @@ function showDay30Report(summary) {
   const config = playModeConfig(summary.mode);
   showModal(`${config.shortLabel} RESULT`, `${config.label}終了`, day30ReportMarkup(summary), false);
   document.getElementById("modal-reset").style.display = "none";
+  resultPresentation.play(document.getElementById("modal-content"), summary);
 }
 function showModal(kicker, title, content, canContinue, showReset = true, closeLabel = "続ける") {
+  resultPresentation.stop();
   document.getElementById("modal-kicker").textContent = kicker;
   document.getElementById("modal-title").textContent = title;
   document.getElementById("modal-content").innerHTML = content;
@@ -7219,6 +8045,7 @@ function unlockDebugState() {
   state.seeds = Object.fromEntries(Object.keys(CROPS).map((cropId) => [cropId, 99]));
   state.marketUnlocked = Object.fromEntries(Object.keys(MARKETS).map((marketId) => [marketId, true]));
   state.marketTabUnlocked = true;
+  state.automationTabUnlocked = true;
   state.shopUnlocked = true;
   state.brokerUnlocked = true;
   state.timeUnlocked = true;
@@ -7227,6 +8054,7 @@ function unlockDebugState() {
     state.unlocks[rule.id] = true;
     applyUnlock(rule);
   });
+  startTitleTrackingIfReady();
   state.equipment = {
     ...(state.equipment || {}),
     tanks: Math.max(Number(state.equipment?.tanks) || 0, 3),
@@ -7264,157 +8092,125 @@ function handleStartTitleTap() {
   startDebugGame();
 }
 
-const APPLE_TOUCH_ACTION_MAX_DURATION_MS = 1200;
-const APPLE_TOUCH_ACTION_MAX_MOVE_PX = 24;
-const APPLE_TOUCH_ACTION_RESUME_BLOCK_MS = 1200;
-let lastAppleTouchStartActionAt = 0;
-let appleTouchStartCandidate = null;
+const APPLE_TOUCH_ACTION_RESUME_BLOCK_MS = 1800;
 let appleTouchActionBlockedUntil = 0;
 let appleTouchActionGuardsBound = false;
-
-function getAppleTouchEventPoint(event) {
-  const touch = event.changedTouches?.[0] || event.touches?.[0] || null;
-  const x = Number.isFinite(event.clientX) ? event.clientX : touch?.clientX;
-  const y = Number.isFinite(event.clientY) ? event.clientY : touch?.clientY;
-  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
-}
-
-function countAppleTouchPoints(event) {
-  if (event.touches && event.touches.length > 1) return event.touches.length;
-  if (event.changedTouches && event.changedTouches.length > 1) return event.changedTouches.length;
-  return 1;
-}
+let appleTouchGestureHadMultiplePoints = false;
+let appleTouchIntentControl = null;
+let appleTouchClickAllowedUntil = 0;
 
 function armAppleTouchActionGuard(reason) {
   if (!APPLE_TOUCH_DEVICE) return;
-  appleTouchStartCandidate = null;
+  appleTouchIntentControl = null;
+  appleTouchClickAllowedUntil = 0;
   appleTouchActionBlockedUntil = Math.max(appleTouchActionBlockedUntil, Date.now() + APPLE_TOUCH_ACTION_RESUME_BLOCK_MS);
   inputDiagnosticLog("touch-guard", reason);
+}
+
+function refreshAppleStartScreenSurface(options = {}) {
+  if (!APPLE_TOUCH_DEVICE || !startScreenOpen) return;
+  const { resetScroll = false } = options;
+  window.requestAnimationFrame(() => {
+    const screen = document.getElementById("start-screen");
+    if (!screen || screen.classList.contains("hidden")) return;
+    if (resetScroll) window.scrollTo(0, 0);
+    screen.getBoundingClientRect();
+  });
+}
+
+function blockAppleUnsafeStartClick(event) {
+  if (!APPLE_TOUCH_DEVICE) return;
+  const control = event.target?.closest?.("#start-screen button");
+  if (!control) return;
+  const now = Date.now();
+  const hasTouchIntent = control === appleTouchIntentControl && now <= appleTouchClickAllowedUntil;
+  const isKeyboardAction = event.detail === 0 && document.activeElement === control;
+  const isMouseAction = event.pointerType === "mouse";
+  appleTouchIntentControl = null;
+  appleTouchClickAllowedUntil = 0;
+  if (now >= appleTouchActionBlockedUntil || hasTouchIntent || isKeyboardAction || isMouseAction) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  inputDiagnosticLog("touch-skip", `guarded-click=${control.id || inputDiagnosticElementLabel(control)}`);
+}
+
+function noteAppleTouchMultiplicity(event) {
+  if (!APPLE_TOUCH_DEVICE) return;
+  const touchCount = event.touches?.length || 0;
+  if (touchCount > 1) {
+    appleTouchGestureHadMultiplePoints = true;
+    armAppleTouchActionGuard("multi-touch");
+    return;
+  }
+  if (event.type === "touchstart" && touchCount === 1 && !appleTouchGestureHadMultiplePoints) {
+    appleTouchIntentControl = event.target?.closest?.("#start-screen button") || null;
+    appleTouchClickAllowedUntil = 0;
+  }
+}
+
+function finishAppleTouchGesture(event) {
+  if (!APPLE_TOUCH_DEVICE || (event.touches?.length || 0) !== 0) return;
+  if (!appleTouchGestureHadMultiplePoints && appleTouchIntentControl) {
+    const endControl = event.target?.closest?.("#start-screen button") || null;
+    if (endControl === appleTouchIntentControl) appleTouchClickAllowedUntil = Date.now() + 900;
+    else appleTouchIntentControl = null;
+  } else {
+    appleTouchIntentControl = null;
+    appleTouchClickAllowedUntil = 0;
+  }
+  if (appleTouchGestureHadMultiplePoints) {
+    armAppleTouchActionGuard("multi-touch-end");
+    refreshAppleStartScreenSurface({ resetScroll: true });
+  }
+  appleTouchGestureHadMultiplePoints = false;
 }
 
 function bindAppleTouchActionGuards() {
   if (!APPLE_TOUCH_DEVICE || appleTouchActionGuardsBound) return;
   appleTouchActionGuardsBound = true;
   window.addEventListener("pagehide", () => armAppleTouchActionGuard("pagehide"));
-  window.addEventListener("pageshow", () => armAppleTouchActionGuard("pageshow"));
+  window.addEventListener("pageshow", () => {
+    armAppleTouchActionGuard("pageshow");
+    refreshAppleStartScreenSurface({ resetScroll: true });
+  });
   window.addEventListener("blur", () => armAppleTouchActionGuard("blur"));
-  window.addEventListener("focus", () => armAppleTouchActionGuard("focus"));
-  document.addEventListener("visibilitychange", () => armAppleTouchActionGuard(`visibility=${document.visibilityState}`));
+  window.addEventListener("focus", () => {
+    armAppleTouchActionGuard("focus");
+    refreshAppleStartScreenSurface({ resetScroll: true });
+  });
+  window.addEventListener("orientationchange", () => {
+    armAppleTouchActionGuard("orientationchange");
+    refreshAppleStartScreenSurface({ resetScroll: true });
+  });
+  document.addEventListener("visibilitychange", () => {
+    armAppleTouchActionGuard(`visibility=${document.visibilityState}`);
+    if (document.visibilityState === "visible") refreshAppleStartScreenSurface({ resetScroll: true });
+  });
+  document.addEventListener("touchstart", noteAppleTouchMultiplicity, { capture: true, passive: true });
+  document.addEventListener("touchmove", noteAppleTouchMultiplicity, { capture: true, passive: true });
+  document.addEventListener("touchend", finishAppleTouchGesture, { capture: true, passive: true });
+  document.addEventListener("touchcancel", (event) => {
+    appleTouchGestureHadMultiplePoints = true;
+    finishAppleTouchGesture(event);
+  }, { capture: true, passive: true });
+  ["gesturestart", "gesturechange", "gestureend"].forEach((type) => {
+    document.addEventListener(type, () => {
+      appleTouchGestureHadMultiplePoints = true;
+      armAppleTouchActionGuard(type);
+      if (type === "gestureend") {
+        refreshAppleStartScreenSurface({ resetScroll: true });
+        appleTouchGestureHadMultiplePoints = false;
+      }
+    }, { capture: true, passive: true });
+  });
+  document.addEventListener("click", blockAppleUnsafeStartClick, true);
 }
 
-function beginAppleTouchStartAction(event, element) {
-  if (!APPLE_TOUCH_DEVICE) return;
-  inputDiagnosticRecordInput(event);
-  if (Date.now() < appleTouchActionBlockedUntil || countAppleTouchPoints(event) !== 1) {
-    appleTouchStartCandidate = null;
-    return;
-  }
-  const point = getAppleTouchEventPoint(event);
-  if (!point) return;
-  appleTouchStartCandidate = {
-    element,
-    pointerId: Number.isFinite(event.pointerId) ? event.pointerId : null,
-    startedAt: Date.now(),
-    x: point.x,
-    y: point.y
-  };
-}
-
-function cancelAppleTouchStartAction(event, reason = "cancel") {
-  if (!APPLE_TOUCH_DEVICE) return;
-  inputDiagnosticRecordInput(event);
-  if (appleTouchStartCandidate) inputDiagnosticLog("touch-skip", reason);
-  appleTouchStartCandidate = null;
-}
-
-function trackAppleTouchStartMove(event) {
-  if (!APPLE_TOUCH_DEVICE || !appleTouchStartCandidate) return;
-  inputDiagnosticRecordInput(event);
-  if (countAppleTouchPoints(event) !== 1) {
-    cancelAppleTouchStartAction(event, "multi-touch");
-    return;
-  }
-  const point = getAppleTouchEventPoint(event);
-  if (!point) return;
-  const distance = Math.hypot(point.x - appleTouchStartCandidate.x, point.y - appleTouchStartCandidate.y);
-  if (distance > APPLE_TOUCH_ACTION_MAX_MOVE_PX) cancelAppleTouchStartAction(event, `move=${Math.round(distance)}`);
-}
-
-function finishAppleTouchStartAction(event, element, action) {
-  if (!APPLE_TOUCH_DEVICE) return;
-  inputDiagnosticRecordInput(event);
-  const now = Date.now();
-  const candidate = appleTouchStartCandidate;
-  appleTouchStartCandidate = null;
-  if (!candidate) {
-    inputDiagnosticLog("touch-skip", "no-start");
-    return;
-  }
-  if (now < appleTouchActionBlockedUntil) {
-    inputDiagnosticLog("touch-skip", "resume-guard");
-    return;
-  }
-  if (candidate.element !== element) {
-    inputDiagnosticLog("touch-skip", "element-mismatch");
-    return;
-  }
-  if (candidate.pointerId !== null && Number.isFinite(event.pointerId) && candidate.pointerId !== event.pointerId) {
-    inputDiagnosticLog("touch-skip", "pointer-mismatch");
-    return;
-  }
-  if (countAppleTouchPoints(event) !== 1) {
-    inputDiagnosticLog("touch-skip", "multi-end");
-    return;
-  }
-  const point = getAppleTouchEventPoint(event);
-  const duration = now - candidate.startedAt;
-  const distance = point ? Math.hypot(point.x - candidate.x, point.y - candidate.y) : 0;
-  const topElement = point ? document.elementFromPoint(point.x, point.y) : null;
-  if (duration > APPLE_TOUCH_ACTION_MAX_DURATION_MS || distance > APPLE_TOUCH_ACTION_MAX_MOVE_PX) {
-    inputDiagnosticLog("touch-skip", `gesture duration=${duration} move=${Math.round(distance)}`);
-    return;
-  }
-  if (topElement && !element.contains(topElement) && topElement !== element) {
-    inputDiagnosticLog("touch-skip", `top=${inputDiagnosticElementLabel(topElement)}`);
-    return;
-  }
-  if (now - lastAppleTouchStartActionAt < 280) return;
-  lastAppleTouchStartActionAt = now;
-  event.preventDefault();
-  event.stopPropagation();
-  inputDiagnosticLog("touch-action", element.id || inputDiagnosticElementLabel(element));
-  action();
-}
-
-function bindAppleTouchStartControl(id, action) {
-  const element = document.getElementById(id);
-  if (!element || element.dataset.appleTouchBound === "true") return;
-  element.dataset.appleTouchBound = "true";
-  element.addEventListener("touchstart", (event) => beginAppleTouchStartAction(event, element), { passive: true });
-  element.addEventListener("touchmove", trackAppleTouchStartMove, { passive: true });
-  element.addEventListener("touchcancel", (event) => cancelAppleTouchStartAction(event, "touchcancel"), { passive: true });
-  element.addEventListener("touchend", (event) => finishAppleTouchStartAction(event, element, action), { passive: false });
-  element.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "mouse") return;
-    beginAppleTouchStartAction(event, element);
-  }, { passive: true });
-  element.addEventListener("pointercancel", (event) => cancelAppleTouchStartAction(event, "pointercancel"), { passive: true });
-  element.addEventListener("pointerup", (event) => {
-    if (event.pointerType === "mouse") return;
-    finishAppleTouchStartAction(event, element, action);
-  }, { passive: false });
-}
 
 function bindAppleTouchStartControls() {
   if (!APPLE_TOUCH_DEVICE) return;
   bindAppleTouchActionGuards();
-  bindAppleTouchStartControl("start-continue", handleStartPrimary);
-  bindAppleTouchStartControl("start-day30", requestSelectedModeGame);
-  bindAppleTouchStartControl("start-new", handleStartContinue);
-  bindAppleTouchStartControl("start-mode-toggle", toggleStartModeView);
-  bindAppleTouchStartControl("fullscreen-button", toggleFullscreenMode);
-  bindAppleTouchStartControl("record-export-button", requestRecordExport);
-  bindAppleTouchStartControl("start-title", handleStartTitleTap);
+  refreshAppleStartScreenSurface({ resetScroll: true });
 }
 
 function startNewGame(mode = "day45") {
@@ -7467,6 +8263,7 @@ function toggleStartModeView() {
 }
 
 function openStartScreen(options = {}) {
+  resultPresentation.stop();
   const { persist = true } = options;
   document.body.classList.add("start-screen-open");
   startScreenOpen = true;
@@ -7487,6 +8284,7 @@ function openStartScreen(options = {}) {
     screen.classList.remove("hidden");
     screen.setAttribute("aria-hidden", "false");
   }
+  refreshAppleStartScreenSurface({ resetScroll: true });
   if (persist) {
     state.paused = pausedBeforeStartScreen;
     saveGame();
@@ -7812,6 +8610,7 @@ function day30ResultToStart() {
 }
 
 function enterDay30ViewMode() {
+  resultPresentation.stop();
   applyDay30PlayerName();
   startScreenOpen = false;
   document.body.classList.remove("start-screen-open");
@@ -8274,13 +9073,59 @@ function renderMarkets(direction = "") {
   renderInventory();
 }
 
+function updateInventorySummary() {
+  const summary = document.getElementById("inventory-summary");
+  if (!summary) return;
+  const count = state.inventory.reduce((sum, batch) => sum + Math.max(0, Number(batch.qty) || 0), 0);
+  summary.innerHTML = `
+    <span>在庫 ${count} / 累計販売 ${state.tradeStats.unitsSold}</span>
+    <strong>₡${formatNumber(state.tradeStats.revenue)} VOLUME</strong>`;
+}
+
+function updateSellAllButton(quote = inventorySaleQuote(selectedMarket)) {
+  const button = document.getElementById("sell-all-button");
+  if (!button) return;
+  const hasStock = quote.items.length > 0;
+  const label = button.querySelector("[data-sell-all-label]");
+  const value = button.querySelector("[data-sell-all-value]");
+  button.disabled = !hasStock;
+  button.classList.toggle("has-stock", hasStock);
+  if (label) label.textContent = hasStock ? `${quote.qty}個を一括売却` : "一括売却";
+  if (value) value.textContent = hasStock ? `₡${formatNumber(quote.revenue)} SELL ALL` : "NO STOCK";
+  button.setAttribute("aria-label", hasStock
+    ? `${MARKETS[quote.marketId]?.name || quote.marketId}で${quote.qty}個を一括売却、売却額₡${formatNumber(quote.revenue)}`
+    : "この市場で一括売却できる在庫はありません");
+}
+
+function inventoryRenderSignature() {
+  refreshInventoryAges();
+  const rows = state.inventory.map((batch) => {
+    const accepted = canSellCropToMarket(batch.crop, selectedMarket);
+    const unitPrice = accepted ? getUnitPrice(batch, selectedMarket) : 0;
+    return [
+      batch.id,
+      batch.crop,
+      Number(batch.qty) || 0,
+      batch.quality,
+      inventoryAgeDays(batch),
+      isInventoryBatchDegraded(batch) ? 1 : 0,
+      accepted ? 1 : 0,
+      unitPrice,
+      saleQuantities[batch.id] || 1
+    ].join(":");
+  });
+  return `${selectedMarket}|${rows.join("|")}`;
+}
+
 function renderInventory() {
   refreshInventoryAges();
   const inventoryList = document.getElementById("inventory-list");
-  const count = state.inventory.reduce((sum, batch) => sum + Math.max(0, Number(batch.qty) || 0), 0);
-  document.getElementById("inventory-summary").innerHTML = `
-    <span>在庫 ${count} / 累計販売 ${state.tradeStats.unitsSold}</span>
-    <strong>₡${formatNumber(state.tradeStats.revenue)} VOLUME</strong>`;
+  if (!inventoryList) return;
+  updateInventorySummary();
+  updateSellAllButton();
+  const signature = inventoryRenderSignature();
+  if (signature === lastInventoryRenderSignature && inventoryList.childElementCount) return;
+  lastInventoryRenderSignature = signature;
 
   if (!state.inventory.length) {
     inventoryList.innerHTML = `<div class="inventory-empty">NO HARVEST STOCK // 収穫物はまだありません</div>`;
@@ -8290,12 +9135,12 @@ function renderInventory() {
   inventoryList.innerHTML = state.inventory.map((batch) => {
     const crop = CROPS[batch.crop];
     const batchQty = Math.max(0, Number(batch.qty) || 0);
-    const qty = Math.min(batchQty, saleQuantities[batch.id] || 1);
+    const qty = Math.max(1, Math.min(batchQty, saleQuantities[batch.id] || 1));
     const accepted = canSellCropToMarket(batch.crop, selectedMarket);
     const batchAge = inventoryAgeDays(batch);
     const degraded = isInventoryBatchDegraded(batch);
     const unitPrice = accepted ? getUnitPrice(batch) : 0;
-    return `<div class="inventory-row" style="--crop-color:${crop.color};--quality-color:${QUALITY[batch.quality].color}">
+    return `<div class="inventory-row" data-inventory-id="${batch.id}" style="--crop-color:${crop.color};--quality-color:${QUALITY[batch.quality].color}">
       <div class="inventory-crop">
         <span class="crop-glyph"><img src="${crop.icon}" alt=""></span>
         <span><strong>${crop.name} x${batchQty}</strong><small>${degraded ? "劣化品 / 売値50%" : "FRESH HARVEST"}</small></span>
@@ -8304,11 +9149,11 @@ function renderInventory() {
       <div class="age-cell"><span class="inventory-label">AGE</span><br><strong>${batchAge} DAY</strong></div>
       <div class="unit-price-cell"><span class="inventory-label">UNIT</span><br><strong>${accepted ? `₡${formatNumber(unitPrice)}` : "--"}</strong></div>
       <div class="qty-control">
-        <button data-qty-id="${batch.id}" data-delta="-1">-</button>
+        <button type="button" data-qty-id="${batch.id}" data-delta="-1" ${qty <= 1 ? "disabled" : ""}>-</button>
         <span>${qty}</span>
-        <button data-qty-id="${batch.id}" data-delta="1">+</button>
+        <button type="button" data-qty-id="${batch.id}" data-delta="1" ${qty >= batchQty ? "disabled" : ""}>+</button>
       </div>
-      <button class="sell-button" data-sell-id="${batch.id}" data-guide-target="sell-${batch.crop}" ${accepted ? "" : "disabled"}>${accepted ? `C${formatNumber(unitPrice * qty)} SELL` : "NOT ACCEPTED"}</button>
+      <button type="button" class="sell-button" data-sell-id="${batch.id}" data-guide-target="sell-${batch.crop}" ${accepted ? "" : "disabled"}>${accepted ? `C${formatNumber(unitPrice * qty)} SELL` : "NOT ACCEPTED"}</button>
     </div>`;
   }).join("");
   applyUiGuide();
@@ -8329,6 +9174,14 @@ function shopCategoryIds() {
   return Object.keys(SHOP_CATEGORIES);
 }
 
+function isShopCategoryAvailable(categoryId) {
+  return categoryId !== "automation" || Boolean(state.automationTabUnlocked);
+}
+
+function selectableShopCategoryIds() {
+  return shopCategoryIds().filter((categoryId) => isShopCategoryAvailable(categoryId));
+}
+
 function shopCategoryCycleDirection(targetCategoryId) {
   const ids = shopCategoryIds();
   const currentIndex = Math.max(0, ids.indexOf(selectedShopCategory));
@@ -8340,7 +9193,7 @@ function shopCategoryCycleDirection(targetCategoryId) {
 }
 
 function cycleShopCategory(direction = 1) {
-  const ids = shopCategoryIds();
+  const ids = selectableShopCategoryIds();
   if (!ids.length) return;
   const currentIndex = Math.max(0, ids.indexOf(selectedShopCategory));
   selectedShopCategory = ids[(currentIndex + direction + ids.length) % ids.length];
@@ -8417,7 +9270,9 @@ function renderEquipmentShopCard(itemId, item) {
 
 function renderShop(direction = "") {
   ensureProcurementTags();
-  if (!SHOP_CATEGORIES[selectedShopCategory]) selectedShopCategory = "seeds";
+  if (!SHOP_CATEGORIES[selectedShopCategory] || !isShopCategoryAvailable(selectedShopCategory)) {
+    selectedShopCategory = "seeds";
+  }
   const category = SHOP_CATEGORIES[selectedShopCategory];
   const tabs = document.getElementById("shop-category-tabs");
   if (tabs) {
@@ -8430,11 +9285,15 @@ function renderShop(direction = "") {
         ${categories.map((categoryId, index) => {
           const entry = SHOP_CATEGORIES[categoryId];
           const position = shopCategoryCarouselPosition(categoryId);
-          return `<button class="shop-category-card ${position} ${selectedShopCategory === categoryId ? "active" : ""}" data-shop-category="${categoryId}" type="button">
+          const available = isShopCategoryAvailable(categoryId);
+          const subtitle = available
+            ? entry.subtitle
+            : `累計売上 ₡${formatNumber(AUTOMATION_CATEGORY_UNLOCK_REVENUE)}で接続`;
+          return `<button class="shop-category-card ${position} ${selectedShopCategory === categoryId ? "active" : ""} ${available ? "" : "locked"}" data-shop-category="${categoryId}" type="button" aria-disabled="${available ? "false" : "true"}">
             <span class="shop-category-kicker">PROCUREMENT // ${String(index + 1).padStart(2, "0")}</span>
             <strong>${entry.label}</strong>
-            <small>${entry.subtitle}</small>
-            <b>${shopCategoryCount(entry)}</b>
+            <small>${subtitle}</small>
+            <b>${available ? shopCategoryCount(entry) : "LOCKED"}</b>
           </button>`;
         }).join("")}
       </div>
@@ -8677,7 +9536,7 @@ renderHeader();
   } else {
     updateFarmProgress();
   }
-  if (document.getElementById("market-screen")?.classList.contains("active")) renderInventory();
+  if (document.getElementById("market-screen")?.classList.contains("active") && Date.now() >= saleBurstActiveUntil) renderInventory();
   if (document.getElementById("schedule-screen")?.classList.contains("active")) renderSchedule();
   if (document.getElementById("radio-screen")?.classList.contains("active")) renderRadio();
   if (document.getElementById("info-screen")?.classList.contains("active")) renderInfo();
@@ -8710,6 +9569,10 @@ function renderTimeControl() {
 }
 
 function bindEvents() {
+  window.addEventListener("pagehide", flushPendingSalePersistence);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPendingSalePersistence();
+  });
   document.addEventListener("click", (event) => {
     const scheduleEntryAction = event.target.closest("[data-schedule-entry]");
     if (scheduleEntryAction) {
@@ -9007,6 +9870,11 @@ function bindEvents() {
     const shopCategoryButton = event.target.closest("[data-shop-category]");
     if (shopCategoryButton) {
       const categoryId = shopCategoryButton.dataset.shopCategory;
+      if (SHOP_CATEGORIES[categoryId] && !isShopCategoryAvailable(categoryId)) {
+        toast(`自動化OSは累計売上 ₡${formatNumber(AUTOMATION_CATEGORY_UNLOCK_REVENUE)}で接続されます`);
+        rejectFeedback({ shake: false });
+        return;
+      }
       if (SHOP_CATEGORIES[categoryId] && selectedShopCategory !== categoryId) {
         const direction = shopCategoryCycleDirection(categoryId);
         selectedShopCategory = categoryId;
@@ -9022,11 +9890,23 @@ function bindEvents() {
     const buyItemButton = event.target.closest("[data-buy-item]");
     if (buyItemButton) buyEquipment(buyItemButton.dataset.buyItem);
 
+    const sellAllButton = event.target.closest("[data-sell-all]");
+    if (sellAllButton) {
+      sellAllInventory(sellAllButton);
+      return;
+    }
+
     const qtyButton = event.target.closest("[data-qty-id]");
-    if (qtyButton) changeSaleQty(qtyButton.dataset.qtyId, Number(qtyButton.dataset.delta));
+    if (qtyButton) {
+      changeSaleQty(qtyButton.dataset.qtyId, Number(qtyButton.dataset.delta));
+      return;
+    }
 
     const sellButton = event.target.closest("[data-sell-id]");
-    if (sellButton) sellBatch(sellButton.dataset.sellId);
+    if (sellButton) {
+      sellBatch(sellButton.dataset.sellId);
+      return;
+    }
   });
 
   document.addEventListener("input", (event) => {
@@ -9034,6 +9914,11 @@ function bindEvents() {
   });
 
   document.addEventListener("pointerdown", (event) => {
+    const saleControl = event.target.closest?.("[data-sell-id], [data-sell-all], [data-qty-id]");
+    if (saleControl) {
+      saleBurstActiveUntil = Date.now() + SALE_POINTER_GUARD_MS;
+      if (pendingSaleRenderTimer) scheduleSaleRender(SALE_POINTER_GUARD_MS);
+    }
     if (cleanToolDrag) clearCleanToolDrag();
     if (isCommsInteractionTarget(event.target)) return;
     if (isCommsBlocking() && !isCommsInteractionTarget(event.target)) {
@@ -9417,6 +10302,7 @@ function bindEvents() {
   document.getElementById("confirm-danger").addEventListener("click", confirmWidgetDangerAction);
   document.getElementById("confirm-extra").addEventListener("click", confirmWidgetExtraAction);
   document.getElementById("modal-close").addEventListener("click", () => {
+    resultPresentation.stop();
     document.getElementById("modal-backdrop").classList.add("hidden");
   });
   window.addEventListener("resize", applyUiScale);

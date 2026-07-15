@@ -45,7 +45,7 @@ body {
 html.apple-touch-device body {
   zoom: normal !important;
   touch-action: auto;
-  overscroll-behavior: none;
+  overscroll-behavior: auto;
   -webkit-user-select: none;
   user-select: none;
   cursor: pointer;
@@ -2886,6 +2886,20 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   filter: saturate(1.05) brightness(1);
 }
 
+.shop-category-card.locked,
+.shop-category-card.locked:hover {
+  opacity: .2;
+  cursor: not-allowed;
+  color: var(--muted);
+  border-color: rgba(144, 164, 154, .14);
+  filter: grayscale(1) saturate(.2) brightness(.45);
+}
+
+.shop-category-card.locked .shop-category-kicker,
+.shop-category-card.locked b {
+  color: rgba(144, 164, 154, .55);
+}
+
 .shop-category-kicker,
 .shop-category-card strong,
 .shop-category-card small,
@@ -3089,12 +3103,86 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   font: 9px/1.45 Consolas, monospace;
 }
 
+.inventory-section-label {
+  gap: 16px;
+}
+
+.inventory-sale-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sell-all-button {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) minmax(96px, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 218px;
+  min-width: 218px;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid #f5d65b;
+  color: #f5d65b;
+  background: #111c15;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: color 100ms ease, background 100ms ease, transform 80ms ease, box-shadow 100ms ease;
+}
+
+.inventory-section-label .sell-all-button span {
+  color: inherit;
+  font: 800 11px "Segoe UI", "Noto Sans JP", sans-serif;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.sell-all-button strong {
+  overflow: hidden;
+  font: 800 10px Consolas, monospace;
+  letter-spacing: 0;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sell-all-button.has-stock:hover {
+  color: #07100d;
+  background: #f5d65b;
+  box-shadow: 0 0 18px rgba(245, 214, 91, 0.22);
+}
+
+.sell-all-button.has-stock:active,
+.sell-button:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.sell-all-button:disabled {
+  border-color: #345046;
+  color: #587066;
+  background: #09130f;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.qty-control button:disabled {
+  color: #41564e;
+  cursor: not-allowed;
+}
+
+
 .inventory-empty {
   padding: 36px 10px;
   color: var(--muted);
   font: 11px Consolas, monospace;
   text-align: center;
 }
+
 
 .inventory-row {
   display: grid;
@@ -7074,6 +7162,93 @@ body.drag-active .guide-pulse {
   }
 }
 
+/* Keep the title screen in document flow on iPadOS. Fixed, filtered scrollers can
+   paint correctly while WebKit keeps an outdated touch hit-test surface. */
+html.apple-touch-device body.start-screen-open {
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+html.apple-touch-device body.start-screen-open #app,
+html.apple-touch-device body.start-screen-open > .action-dock,
+html.apple-touch-device body.start-screen-open > .scanlines,
+html.apple-touch-device body.start-screen-open::before {
+  display: none;
+}
+
+html.apple-touch-device .start-screen {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow: visible;
+  place-items: start center;
+  isolation: isolate;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+html.apple-touch-device .confirm-widget,
+html.apple-touch-device .modal-backdrop {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+html.apple-touch-device .start-panel {
+  margin-inline: auto;
+}
+
+html.apple-touch-device .start-primary-hit,
+html.apple-touch-device .start-title-hotspot {
+  background: rgba(0, 0, 0, 0.001);
+  transform: none;
+}
+
+html.apple-touch-device .start-hero::before,
+html.apple-touch-device .start-hero::after,
+html.apple-touch-device .start-shadow,
+html.apple-touch-device .start-lettuce,
+html.apple-touch-device .start-grow,
+html.apple-touch-device .start-logo-img,
+html.apple-touch-device .start-tap-img,
+html.apple-touch-device .start-subtitle-img {
+  animation: none !important;
+  filter: none !important;
+  transform: none !important;
+  will-change: auto !important;
+}
+
+html.apple-touch-device .start-hero::before,
+html.apple-touch-device .start-grow {
+  mix-blend-mode: normal;
+}
+
+html.apple-touch-device .start-hero::before {
+  opacity: 0.12;
+}
+
+html.apple-touch-device .start-hero::after {
+  opacity: 0.34;
+}
+
+html.apple-touch-device .start-grow {
+  opacity: 0.58;
+}
+
+html.apple-touch-device .start-tap-aura {
+  display: none;
+}
+
+html.apple-touch-device .start-screen .start-mode-chip,
+html.apple-touch-device .start-screen .start-tool-button,
+html.apple-touch-device .start-screen .start-status,
+html.apple-touch-device .start-records {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 
 /* Story conversation events: cinematic communication layer. */
 .story-comms-overlay {
@@ -8132,5 +8307,466 @@ html.apple-touch-device .ios-input-diagnostic pre {
 
   .ios-input-diagnostic pre {
     max-height: calc(30vh - 34px);
+  }
+}
+/* Day-limit result presentation, adapted from ref/neon.css and ref/fx (1).js. */
+#result-fx-canvas {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+#result-fx-canvas.active {
+  opacity: 1;
+}
+
+.modal.fx-result {
+  --result-magenta: #c86bff;
+  position: relative;
+  isolation: isolate;
+  width: min(680px, 100%);
+  max-height: min(88svh, 760px);
+  overflow: hidden;
+  border-color: rgba(245, 214, 91, 0.86);
+  background:
+    linear-gradient(145deg, rgba(14, 35, 27, 0.98), rgba(3, 9, 7, 0.99)),
+    #060c09;
+  box-shadow:
+    0 0 0 1px rgba(72, 219, 234, 0.2),
+    0 0 42px rgba(245, 214, 91, 0.18),
+    0 24px 90px rgba(0, 0, 0, 0.72);
+}
+
+.modal.fx-result::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -75%;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg 24deg,
+      rgba(113, 255, 184, 0.16) 48deg,
+      transparent 78deg 146deg,
+      rgba(200, 107, 255, 0.17) 176deg,
+      transparent 205deg 284deg,
+      rgba(245, 214, 91, 0.2) 318deg,
+      transparent 348deg
+    );
+  pointer-events: none;
+  animation: fx-result-frame 10s linear infinite;
+}
+
+.modal.fx-result > * {
+  position: relative;
+  z-index: 1;
+}
+
+.modal.fx-result > .modal-actions {
+  display: none;
+}
+
+.modal.fx-result .eyebrow {
+  color: var(--yellow);
+}
+
+.modal.fx-result h2 {
+  margin-bottom: 12px;
+  color: var(--green-bright);
+  text-shadow: 0 0 18px rgba(113, 255, 184, 0.24);
+}
+
+.modal.fx-result #modal-content {
+  padding: 2px 7px 5px 2px;
+}
+
+@keyframes fx-result-frame {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fx-result-hero {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  min-height: 94px;
+  margin: 2px 0 14px;
+  padding: 13px 14px 11px;
+  overflow: hidden;
+  border-block: 1px solid rgba(245, 214, 91, 0.24);
+  background:
+    linear-gradient(90deg, transparent, rgba(245, 214, 91, 0.07), transparent);
+  opacity: 0;
+  transform: scale(1.12);
+  filter: blur(8px);
+}
+
+.fx-result-hero::after {
+  content: "";
+  position: absolute;
+  inset: 50% -20% auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--yellow), transparent);
+  box-shadow: 0 0 18px var(--yellow);
+  transform: scaleX(0);
+}
+
+.fx-result-hero span,
+.fx-result-hero strong {
+  display: block;
+  font-family: Consolas, "Noto Sans JP", monospace;
+  font-style: normal;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.fx-result-hero span {
+  align-self: end;
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.fx-result-hero strong {
+  align-self: start;
+  margin-top: 7px;
+  color: var(--yellow);
+  font-size: 48px;
+  text-shadow:
+    0 0 12px rgba(245, 214, 91, 0.55),
+    0 0 34px rgba(245, 214, 91, 0.26);
+}
+
+.fx-result-hero.on {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  animation: fx-hero-stamp 560ms cubic-bezier(0.16, 0.88, 0.28, 1.28) both;
+}
+
+.fx-result-hero.on::after {
+  animation: fx-hero-line 620ms 80ms ease-out both;
+}
+
+@keyframes fx-hero-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(1.32);
+    filter: blur(10px);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.96);
+    filter: blur(0);
+  }
+  78% {
+    transform: scale(1.025);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fx-hero-line {
+  0% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  45% {
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0.35;
+  }
+}
+
+.fx-result .modal-report {
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.fx-result .fx-stat {
+  position: relative;
+  min-height: 42px;
+  padding: 10px 12px 10px 15px;
+  overflow: hidden;
+  border: 1px solid rgba(72, 219, 234, 0.1);
+  border-left: 3px solid rgba(72, 219, 234, 0.42);
+  background: linear-gradient(90deg, rgba(72, 219, 234, 0.055), transparent 68%);
+  opacity: 0;
+  transform: translateX(-42px);
+  filter: blur(4px);
+}
+
+.fx-result .fx-stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 -40%;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, rgba(113, 255, 184, 0.16), transparent);
+  pointer-events: none;
+}
+
+.fx-result .fx-stat.on {
+  opacity: 1;
+  transform: translateX(0);
+  filter: blur(0);
+  transition:
+    opacity 330ms ease,
+    transform 430ms cubic-bezier(0.18, 0.85, 0.25, 1),
+    filter 300ms ease;
+}
+
+.fx-result .fx-stat.on::before {
+  animation: fx-stat-scan 680ms ease-out both;
+}
+
+.fx-result .fx-stat span {
+  color: #8eb4a5;
+}
+
+.fx-result .fx-stat strong {
+  max-width: 62%;
+  color: var(--text);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@keyframes fx-stat-scan {
+  to {
+    left: 120%;
+  }
+}
+
+.fx-result .fx-revenue-row {
+  border-color: rgba(245, 214, 91, 0.28);
+  border-left-color: var(--yellow);
+  background:
+    linear-gradient(90deg, rgba(245, 214, 91, 0.11), rgba(245, 214, 91, 0.025) 66%, transparent);
+}
+
+.fx-result .fx-revenue {
+  display: inline-flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  color: var(--yellow);
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 13px rgba(245, 214, 91, 0.4);
+}
+
+.fx-result .fx-digit {
+  display: inline-block;
+  min-width: 0.55em;
+  color: inherit;
+  font-style: normal;
+  opacity: 0;
+  transform: translateY(-18px) scale(1.35);
+  filter: blur(4px);
+}
+
+.fx-result .fx-digit.on {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+  transition:
+    opacity 170ms ease,
+    transform 240ms cubic-bezier(0.2, 0.9, 0.28, 1.35),
+    filter 180ms ease;
+}
+
+.fx-result .fx-revenue.done {
+  animation: fx-revenue-pulse 720ms ease-out both;
+}
+
+@keyframes fx-revenue-pulse {
+  36% {
+    color: #fff7b2;
+    text-shadow:
+      0 0 12px rgba(245, 214, 91, 0.9),
+      0 0 34px rgba(245, 214, 91, 0.55);
+    transform: scale(1.08);
+  }
+}
+
+.fx-title-line {
+  display: grid;
+  gap: 9px;
+  margin: 17px 0 2px;
+  padding: 13px 12px;
+  border-block: 1px solid rgba(200, 107, 255, 0.24);
+  background: linear-gradient(90deg, rgba(200, 107, 255, 0.07), transparent);
+}
+
+.fx-title-label {
+  color: var(--result-magenta);
+  font: 800 10px Consolas, monospace;
+  letter-spacing: 0;
+}
+
+.fx-title-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fx-title-badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid rgba(200, 107, 255, 0.48);
+  color: #e8c9ff;
+  background:
+    linear-gradient(135deg, rgba(200, 107, 255, 0.18), rgba(72, 219, 234, 0.07));
+  box-shadow: inset 0 0 14px rgba(200, 107, 255, 0.08);
+  font: 800 11px/1.35 "Noto Sans JP", sans-serif;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  transform: translateY(15px) rotate(-2deg) scale(1.08);
+  filter: blur(4px);
+}
+
+.fx-title-badge.no-title {
+  border-color: rgba(117, 150, 137, 0.34);
+  color: var(--muted);
+  background: rgba(117, 150, 137, 0.06);
+}
+
+.fx-title-badge.on {
+  opacity: 1;
+  transform: translateY(0) rotate(0) scale(1);
+  filter: blur(0);
+  transition:
+    opacity 260ms ease,
+    transform 430ms cubic-bezier(0.18, 0.9, 0.2, 1.25),
+    filter 260ms ease;
+}
+
+.fx-late {
+  opacity: 0;
+  transform: translateY(14px);
+  filter: blur(3px);
+  pointer-events: none;
+}
+
+.fx-late.on {
+  opacity: 1;
+  transform: translateY(0);
+  filter: blur(0);
+  pointer-events: auto;
+  transition:
+    opacity 360ms ease,
+    transform 420ms ease,
+    filter 320ms ease;
+}
+
+.fx-result .day30-name-field input {
+  border-color: rgba(113, 255, 184, 0.42);
+  box-shadow: inset 0 0 18px rgba(113, 255, 184, 0.04);
+}
+
+.fx-result .day30-share-actions,
+.fx-result .day30-result-actions {
+  margin-top: 12px;
+}
+
+.fx-result-done .fx-result-hero,
+.fx-result-done .fx-stat,
+.fx-result-done .fx-digit,
+.fx-result-done .fx-title-badge,
+.fx-result-done .fx-late {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.fx-result-done .fx-late {
+  pointer-events: auto;
+}
+
+@media (max-width: 760px) {
+  .modal.fx-result {
+    max-height: min(92svh, 760px);
+    padding: 20px;
+  }
+
+  .fx-result-hero {
+    min-height: 82px;
+  }
+
+  .fx-result-hero strong {
+    font-size: 34px;
+  }
+
+  .fx-result .fx-stat {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .fx-result .fx-stat strong {
+    max-width: 58%;
+  }
+
+  .fx-result .day30-share-actions,
+  .fx-result .day30-result-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fx-result .day30-share-actions button,
+  .fx-result .day30-result-actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #result-fx-canvas {
+    display: none;
+  }
+
+  .modal.fx-result::before,
+  .fx-result-hero,
+  .fx-result-hero::after,
+  .fx-result .fx-stat,
+  .fx-result .fx-stat::before,
+  .fx-result .fx-digit,
+  .fx-result .fx-revenue,
+  .fx-title-badge,
+  .fx-late {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .inventory-sale-actions > small {
+    display: none;
+  }
+
+  .sell-all-button {
+    width: 206px;
+    min-width: 206px;
+  }
+}
+
+@media (max-width: 460px) {
+  .inventory-section-label {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inventory-sale-actions,
+  .sell-all-button {
+    width: 100%;
+    min-width: 0;
   }
 }

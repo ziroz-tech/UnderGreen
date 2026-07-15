@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=203">
+    <link rel="stylesheet" href="styles.css?v=208">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -133,7 +133,16 @@
           <div class="price-grid" id="price-grid"></div>
         </div>
         <div class="inventory-panel">
-          <div class="section-label"><span>HARVEST INVENTORY</span><small>SELECT STOCK TO SELL</small></div>
+          <div class="section-label inventory-section-label">
+            <span>HARVEST INVENTORY</span>
+            <div class="inventory-sale-actions">
+              <small>SELECT STOCK TO SELL</small>
+              <button class="sell-all-button" id="sell-all-button" data-sell-all type="button" disabled>
+                <span data-sell-all-label>一括売却</span>
+                <strong data-sell-all-value>NO STOCK</strong>
+              </button>
+            </div>
+          </div>
           <div id="inventory-list"></div>
         </div>
       </section>
@@ -397,6 +406,6 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=210"></script>
+  <script src="game.js?v=218"></script>
 </body>
 </html>
