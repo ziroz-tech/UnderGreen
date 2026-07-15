@@ -20,3 +20,11 @@ story_lower_market_first_leaf,operator,right,0,オペレーター,未登録栽�
 story_lower_market_first_leaf,narrator,system,0,？？,,
 story_first_place_floor_lock_v1,support_robot,left,0,サポートロボット,押しかけ就職志願,assets/characters/supportRobot-iso-leftdown.png
 story_first_place_floor_lock_v1,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
+story_automation_os_unlocked,mara,left,0,マーラ,種ブローカー,assets/characters/seed-broker.png
+story_automation_os_unlocked,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
+story_automation_os_unlocked,narrator,system,0,？？,,
+story_automation_evaluation,mara,left,0,マーラ,種ブローカー,assets/characters/seed-broker.png
+story_automation_evaluation,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
+story_pre_result_robot_interview,support_robot,left,0,サポートロボット,前農場・支援担当,assets/characters/supportRobot-iso-leftdown.png
+story_pre_result_robot_interview,unknown,right,0,？？？,別農場・採用担当,
+story_pre_result_robot_interview,narrator,system,0,？？,,

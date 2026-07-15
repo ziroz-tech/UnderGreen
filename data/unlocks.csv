@@ -18,10 +18,12 @@ shop_fan,shop_item,fan,unitPlaced:box>=1,unlock_devices,BOXを設置すると環
 shop_tank,shop_item,tank,unitPlaced:box>=1,unlock_devices,BOXを設置すると補給拡張が解放されます,false
 shop_filter,shop_item,filter,unitPlaced:box>=1|revenue>=1600,unlock_storage,BOX運用後に累計売上1600で恒久設備が解放されます,false
 shop_fridge,shop_item,fridge,unitPlaced:box>=1|revenue>=1600,unlock_storage,BOX運用後に累計売上1600で保管設備が解放されます,false
-market_medical,market,medical,cropSold:basil>=3|revenue>=1400,market_medical_unlocked,バジルを3株売り累計売上1400で接続,false
+market_medical,market,medical,revenue>=1000,market_medical_unlocked,累計売上1000Cで接続,false
 broker_access,broker,broker,unit:pod>=4|unitPlaced:pod>=4,property_broker_unlocked,追加PODを3台購入して全4台を設置すると物件紹介が届きます,false
-market_upper,market,upper,cropSold:tomato>=4|unitsSold>=25|revenue>=4200,market_upper_unlocked,トマトを4株売り累計25株販売と売上4200で接続,false
-market_rebel,market,rebel,marketRevenue:lower>=4000|cropSold:tomato>=4,market_rebel_unlocked,下層へ4000以上流しトマトを4株売ると接触があります,false
+automation_os_access,tab,automation,revenue>=1500,automation_os_unlocked,累計売上1500Cで自動化OS取引を解放,false
+automation_os_evaluation,story,automation_evaluation,automationTabUnlocked=true,automation_evaluation,自動化OS解放後にマーラから評価について通信,false
+market_upper,market,upper,revenue>=3000,market_upper_unlocked,累計売上3000Cで接続,false
+market_rebel,market,rebel,revenue>=3000,market_rebel_unlocked,累計売上3000Cで上層市場の次に接続,false
 shop_support_robot,shop_item,support_robot,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に追加機を購入できます,false
 shop_procurement_terminal,shop_item,procurement_terminal,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に設置型調達端末を購入できます,false
 shop_shipping_hatch,shop_item,shipping_hatch,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に出荷用搬出口を購入できます,false
