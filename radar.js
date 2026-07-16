@@ -12,6 +12,10 @@
   const PATROL_SPEED_MIN = 0.0035;
   const PATROL_SPEED_MAX = 0.0065;
   const APPROACH_SPEED = 0.009;
+  const RAPID_APPROACH_SPEED = APPROACH_SPEED * 1.8;
+  const RAPID_CHANCE_MIN = 0.02;
+  const RAPID_CHANCE_MAX = 0.5;
+  const RAPID_CHANCE_EXPONENT = 1.2;
   const TUTORIAL_APPROACH_SPEED = 0.03;
   const APPROACH_GUARANTEE_DAYS = 5;
   const RETREAT_SPEED = 0.012;
@@ -24,6 +28,11 @@
   const rand = (min, max) => min + Math.random() * (max - min);
   const distanceToBase = (contact) => Math.hypot(contact.x - BASE.x, contact.y - BASE.y);
   const rgba = (rgb, alpha) => "rgba(" + rgb + "," + alpha + ")";
+  const rapidApproachChance = (suspicion) => {
+    const suspicionRatio = clamp((Number(suspicion) || 0) / 100, 0, 1);
+    return RAPID_CHANCE_MIN
+      + (RAPID_CHANCE_MAX - RAPID_CHANCE_MIN) * Math.pow(suspicionRatio, RAPID_CHANCE_EXPONENT);
+  };
 
   const win = document.createElement("aside");
   win.className = "radar-window";
@@ -73,7 +82,7 @@
   fineOverlay.innerHTML = [
     '<div class="fine-stamp">',
       '<small>ENFORCEMENT ACTION</small>',
-      '<strong>官憲による摘発</strong>',
+      '<strong>管理局による摘発</strong>',
       '<b id="fine-amount">罰金 C---</b>',
       '<span id="fine-balance">稼働中の熱シグネチャを検知</span>',
     '</div>'
@@ -262,6 +271,7 @@
       mode: "patrol",
       phase: rand(0, Math.PI * 2),
       resolved: false,
+      rapid: false,
       tutorial: Boolean(demo)
     };
   }
@@ -295,6 +305,9 @@
     const normalized = typeof options === "boolean" ? { tutorial: options } : (options || {});
     const tutorial = Boolean(normalized.tutorial);
     const guaranteed = Boolean(normalized.guaranteed);
+    const rapid = !tutorial && (typeof normalized.rapid === "boolean"
+      ? normalized.rapid
+      : Math.random() < rapidApproachChance(snapshot.suspicion));
     if (approacher || !snapshot.unlocked || !snapshot.running) return false;
     let candidates = patrols.filter((contact) => contact.mode === "patrol");
     if (!candidates.length) {
@@ -309,14 +322,20 @@
     }
     contact.mode = "approach";
     contact.resolved = false;
+    contact.rapid = rapid;
     contact.tutorial = tutorial;
     approacher = contact;
     if (typeof bridge.markApproachStarted === "function") {
       bridge.markApproachStarted({ tutorial, guaranteed });
       snapshot = bridge.getSnapshot();
     }
-    showMessage(tutorial ? "TUTORIAL / 接近ベクトルを捕捉" : "接近ベクトルを捕捉", "warn");
-    tone(720, 0.14, { type: "triangle", gain: 0.07 });
+    const approachMessage = tutorial
+      ? "TUTORIAL / 接近ベクトルを捕捉"
+      : rapid
+        ? "RAPID RESPONSE / 管理局高速個体を捕捉"
+        : "接近ベクトルを捕捉";
+    showMessage(approachMessage, "warn");
+    tone(rapid ? 920 : 720, 0.14, { type: "triangle", gain: rapid ? 0.085 : 0.07 });
     if (tutorial && snapshot.demoPending) {
       bridge.consumeDemo();
       snapshot = bridge.getSnapshot();
@@ -376,14 +395,17 @@
     }
     contact.mode = "retreat";
     contact.tutorial = false;
+    contact.rapid = false;
     approacher = null;
     scheduleNextApproach(true);
   }
 
   function showFine(result) {
     const amount = Number(result.amount) || 0;
+    const percent = Math.round((Number(result.rate) || 0) * 100);
     fineOverlay.querySelector("#fine-amount").textContent = "罰金 C" + amount.toLocaleString();
-    fineOverlay.querySelector("#fine-balance").textContent = "残高 C" + (Number(result.money) || 0).toLocaleString();
+    fineOverlay.querySelector("#fine-balance").textContent =
+      "所持金の" + percent + "% / 残高 C" + (Number(result.money) || 0).toLocaleString();
     fineOverlay.classList.remove("on");
     document.body.classList.remove("radar-shake");
     void fineOverlay.offsetWidth;
@@ -405,7 +427,11 @@
 
     if (contact.mode === "approach") {
       targetHeading = Math.atan2(BASE.y - contact.y, BASE.x - contact.x);
-      speed = contact.tutorial ? TUTORIAL_APPROACH_SPEED : APPROACH_SPEED;
+      speed = contact.tutorial
+        ? TUTORIAL_APPROACH_SPEED
+        : contact.rapid
+          ? RAPID_APPROACH_SPEED
+          : APPROACH_SPEED;
     } else if (contact.mode === "retreat") {
       targetHeading = Math.atan2(contact.y - BASE.y, contact.x - BASE.x);
       speed = RETREAT_SPEED;
@@ -472,9 +498,17 @@
     if (!snapshot.running) {
       banner.textContent = "CLOCK HOLD";
     } else if (inPulse) {
-      banner.textContent = imminent ? "CONTACT IMMINENT" : "PULSE RANGE";
+      banner.textContent = imminent
+        ? "CONTACT IMMINENT"
+        : approacher?.rapid
+          ? "RAPID / PULSE RANGE"
+          : "PULSE RANGE";
     } else {
-      banner.textContent = approacher ? "APPROACH VECTOR" : "PERIMETER CLEAR";
+      banner.textContent = approacher
+        ? approacher.rapid
+          ? "RAPID APPROACH"
+          : "APPROACH VECTOR"
+        : "PERIMETER CLEAR";
     }
 
     nearestEl.textContent = approacher ? Math.max(0, Math.round(metrics.distance * 1000)) + "m" : "---";
@@ -591,10 +625,12 @@
     patrols.forEach((contact) => {
       const contactDistance = distanceToBase(contact);
       const isApproacher = contact === approacher;
+      const isRapid = Boolean(isApproacher && contact.rapid);
       const color = isApproacher ? (contactDistance <= PULSE_RADIUS ? RED : YELLOW) : GREEN;
       const x = contact.x * size;
       const y = contact.y * size;
-      const blink = snapshot.running ? 0.62 + Math.sin(activeClockMs / (isApproacher ? 130 : 430) + contact.phase) * 0.34 : 0.62;
+      const blinkRate = isRapid ? 78 : isApproacher ? 130 : 430;
+      const blink = snapshot.running ? 0.62 + Math.sin(activeClockMs / blinkRate + contact.phase) * 0.34 : 0.62;
 
       ctx.strokeStyle = rgba(color, isApproacher ? 0.42 + metrics.intensity * 0.4 : 0.14);
       ctx.lineWidth = isApproacher ? 1.25 : 0.8;
@@ -606,6 +642,20 @@
       ctx.beginPath();
       ctx.arc(x, y, isApproacher ? 4.8 : 3.2, 0, Math.PI * 2);
       ctx.fill();
+
+      if (isRapid) {
+        const markerRadius = 8 + Math.sin(activeClockMs / 90 + contact.phase) * 1.2;
+        ctx.save();
+        ctx.strokeStyle = rgba(RED, 0.78);
+        ctx.fillStyle = rgba(RED, 0.92);
+        ctx.lineWidth = 1.25;
+        ctx.beginPath();
+        ctx.arc(x, y, markerRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.font = "700 8px Consolas, monospace";
+        ctx.fillText("FAST", x + 9, y - 7);
+        ctx.restore();
+      }
 
       if (isApproacher) {
         ctx.save();

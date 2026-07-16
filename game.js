@@ -1680,7 +1680,7 @@ function createDefaultSupportAutomation() {
   };
 }
 
-const RADAR_FINE_AMOUNTS = [30, 50, 100, 150];
+const RADAR_FINE_RATES = Array.from({ length: 10 }, (_, index) => (index + 1) / 10);
 const RADAR_MAX_PATROLS = 12;
 
 function createDefaultRadarState() {
@@ -1713,7 +1713,7 @@ function ensureRadarState() {
   state.radar.unlocked = Boolean(state.radar.unlocked || state.unlocks?.radar_access);
   state.radar.suspicion = Math.max(0, Math.min(100, Math.round(Number(state.radar.suspicion) || 0)));
   state.radar.patrolCount = Math.max(0, Math.min(RADAR_MAX_PATROLS, Math.round(Number(state.radar.patrolCount) || 0)));
-  state.radar.fineLevel = Math.max(0, Math.min(RADAR_FINE_AMOUNTS.length - 1, Math.round(Number(state.radar.fineLevel) || 0)));
+  state.radar.fineLevel = Math.max(0, Math.min(RADAR_FINE_RATES.length - 1, Math.round(Number(state.radar.fineLevel) || 0)));
   state.radar.powerOn = state.radar.powerOn !== false;
   state.radar.demoPending = Boolean(state.radar.demoPending);
   state.radar.demoConsumed = Boolean(state.radar.demoConsumed);
@@ -1866,20 +1866,26 @@ function setRadarPower(powerOn) {
 function applyRadarFine() {
   const radar = ensureRadarState();
   if (!radar.unlocked || !radar.powerOn || radar.tutorialActive) return null;
-  const fineIndex = Math.max(0, Math.min(RADAR_FINE_AMOUNTS.length - 1, radar.fineLevel));
-  const amount = RADAR_FINE_AMOUNTS[fineIndex];
+  const fineIndex = Math.max(0, Math.min(RADAR_FINE_RATES.length - 1, radar.fineLevel));
+  const rate = RADAR_FINE_RATES[fineIndex];
+  const balance = Math.max(0, Math.floor(Number(state.money) || 0));
+  const amount = Math.min(balance, Math.ceil(balance * rate));
   state.money -= amount;
-  radar.fineLevel = Math.min(RADAR_FINE_AMOUNTS.length - 1, fineIndex + 1);
+  radar.fineLevel = Math.min(RADAR_FINE_RATES.length - 1, fineIndex + 1);
   radar.finesPaid += amount;
   radar.detections += 1;
-  setStatus("巡回官憲に検知され、罰金 C" + amount + "を徴収されました。", { log: false });
-  toast("検知ペナルティ -C" + amount, "error");
+  const percent = Math.round(rate * 100);
+  setStatus(
+    "巡回官憲に検知され、所持金の" + percent + "%（C" + amount + "）を徴収されました。",
+    { log: false }
+  );
+  toast("検知ペナルティ " + percent + "% / -C" + amount, "error");
   playSoundFirst(["alert", "failure"], 0.28);
   pulseElement(document.getElementById("money-value"));
   saveGame();
   renderHeader();
   notifyRadarState();
-  return { amount, money: state.money, fineLevel: radar.fineLevel };
+  return { amount, rate, money: state.money, fineLevel: radar.fineLevel };
 }
 
 function triggerPendingRadarUnlockConversation() {
@@ -2353,23 +2359,6 @@ function allMarketsUnlocked() {
   return marketIds.length > 0 && marketIds.every((marketId) => Boolean(state.marketUnlocked?.[marketId]));
 }
 
-function migrateLegacyAutomationEvaluationTiming() {
-  if (allMarketsUnlocked()) return false;
-  const storyId = "story_automation_evaluation";
-  const hasLegacyProgress = Boolean(
-    state.unlocks?.automation_os_evaluation
-    || state.storySeen?.[storyId]
-    || state.storyChoices?.[storyId]
-    || state.storyOpen?.some((entry) => entry?.id === storyId)
-  );
-  if (!hasLegacyProgress) return false;
-  delete state.unlocks.automation_os_evaluation;
-  delete state.storySeen[storyId];
-  delete state.storyChoices[storyId];
-  state.storyOpen = state.storyOpen.filter((entry) => entry?.id !== storyId);
-  return true;
-}
-
 function startTitleTrackingIfReady() {
   const tracking = ensureTitleTrackingState();
   if (tracking.started || !allMarketsUnlocked()) return false;
@@ -2708,7 +2697,6 @@ function loadGame() {
   state.tradeStats.foodToRebels ||= 0;
   state.tradeStats.weaponsToRebels ||= 0;
   state.marketUnlocked = { lower: true, medical: false, upper: false, rebel: false, ...(state.marketUnlocked || {}) };
-  migrateLegacyAutomationEvaluationTiming();
   state.automationTabUnlocked = Boolean(state.automationTabUnlocked);
   ensureTitleTrackingState();
   const pendingResult = state.pendingDay30Result;
@@ -4821,6 +4809,10 @@ function storyEffectApplies(effect, choiceId) {
 
 function runStoryEffect(effect, context = {}) {
   if (!effect) return;
+  if (effect.action === "story") {
+    triggerStoryEvent(effect.value, context);
+    return;
+  }
   if (effect.action === "comms") {
     triggerComms(effect.value, context, { skipStory: true });
     return;
