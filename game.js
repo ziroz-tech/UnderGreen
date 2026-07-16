@@ -551,6 +551,7 @@ const SUPPORT_ROBOT_MAX_ENERGY = 100;
 const SUPPORT_TASK_BASE_COOLDOWN = { harvest: 0.055, plant: 0.06, cleaning: 0.06, procure: 0.08, ship: 0.08 };
 const SUPPORT_TASK_BASE_COST = { harvest: 5, plant: 4, cleaning: 6, procure: 4, ship: 4 };
 const SUPPORT_TASKS = Object.keys(SUPPORT_TASK_BASE_COOLDOWN);
+const SUPPORT_PLANT_SHORTAGE_NOTICE_DAYS = 1;
 const SUPPORT_GRADE_MULTIPLIER = { S: 1.35, A: 1.12, B: 1, C: 0.78 };
 
 function parseCsv(text) {
@@ -625,6 +626,17 @@ const REQUIRED_GAME_DATA_PATHS = [
   "data/ui_text.csv",
 ];
 const csvTextCache = new Map();
+const CHARACTER_ASSET_CACHE_KEY = Date.now().toString(36);
+
+function freshCharacterAssetUrl(value) {
+  const raw = String(value ?? "");
+  const url = raw.trim();
+  if (!/^(?:\.\/)?assets\/characters\//i.test(url) || /[?&]ugchar=/.test(url)) return raw;
+  const hashIndex = url.indexOf("#");
+  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  return `${base}${base.includes("?") ? "&" : "?"}ugchar=${CHARACTER_ASSET_CACHE_KEY}${hash}`;
+}
 
 async function loadCsv(path) {
   if (!csvTextCache.has(path)) {
@@ -748,7 +760,7 @@ function storySpeakerGroups(rows) {
       slot: toNumber(row.slot || row.order, index),
       name: row.name || speakerId,
       role: row.role || "",
-      icon: row.icon || ""
+      icon: freshCharacterAssetUrl(row.icon)
     };
     return groups;
   }, {});
@@ -827,7 +839,7 @@ async function loadExternalData() {
     MARKETS = rowsToObject(rows, (row) => ({
       name: row.name,
       contact: row.contact,
-      portrait: row.portrait,
+      portrait: freshCharacterAssetUrl(row.portrait),
       description: row.description,
       risk: row.risk,
       multipliers: toMap(row.multipliers),
@@ -1104,7 +1116,7 @@ async function loadExternalData() {
       trigger: row.trigger,
       speakerName: row.speakerName,
       speakerRole: row.speakerRole,
-      icon: row.icon,
+      icon: freshCharacterAssetUrl(row.icon),
       kicker: row.kicker,
       title: row.title,
       pages: toList(row.body),
@@ -1190,6 +1202,11 @@ function addAssetUrl(set, value) {
 
 function collectBootImageAssets() {
   const urls = new Set();
+  document.querySelectorAll("img[src]").forEach((image) => {
+    const current = image.getAttribute("src");
+    const fresh = freshCharacterAssetUrl(current);
+    if (fresh !== current) image.setAttribute("src", fresh);
+  });
   document.querySelectorAll("img[src], link[rel='icon'][href]").forEach((element) => {
     addAssetUrl(urls, element.getAttribute("src") || element.getAttribute("href"));
   });
@@ -1272,13 +1289,14 @@ async function preloadBootAssets() {
 }
 function applyUiText(rows) {
   rows.forEach((row) => {
-    UI_TEXT[row.key] = row.text;
+    const value = freshCharacterAssetUrl(row.text);
+    UI_TEXT[row.key] = value;
     if (!row.selector) return;
     const element = row.selector === "title" ? document.querySelector("title") : document.querySelector(row.selector);
     if (!element) return;
-    if (row.attribute === "html") element.innerHTML = row.text;
-    else if (row.attribute === "text") element.textContent = row.text;
-    else element.setAttribute(row.attribute, row.text);
+    if (row.attribute === "html") element.innerHTML = value;
+    else if (row.attribute === "text") element.textContent = value;
+    else element.setAttribute(row.attribute, value);
   });
 }
 
@@ -1305,7 +1323,8 @@ function textBlockMarkup(value, className = "") {
 }
 
 function optionalImageMarkup(src, alt = "", className = "") {
-  return src ? `<img class="${escapeHtml(className)}" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">` : "";
+  const resolvedSrc = freshCharacterAssetUrl(src);
+  return resolvedSrc ? `<img class="${escapeHtml(className)}" src="${escapeHtml(resolvedSrc)}" alt="${escapeHtml(alt)}">` : "";
 }
 
 
@@ -1661,6 +1680,238 @@ function createDefaultSupportAutomation() {
   };
 }
 
+const RADAR_FINE_AMOUNTS = [30, 50, 100, 150];
+const RADAR_MAX_PATROLS = 12;
+
+function createDefaultRadarState() {
+  return {
+    unlocked: false,
+    suspicion: 0,
+    patrolCount: 3,
+    fineLevel: 0,
+    powerOn: true,
+    demoPending: false,
+    demoConsumed: false,
+    tutorialActive: false,
+    tutorialResolved: false,
+    tutorialOutcome: "",
+    lastApproachDayFloat: null,
+    approachesStarted: 0,
+    unlockConversationPending: false,
+    finesPaid: 0,
+    detections: 0
+  };
+}
+
+function ensureRadarState() {
+  if (!state) return createDefaultRadarState();
+  const defaults = createDefaultRadarState();
+  const saved = state.radar && typeof state.radar === "object" ? state.radar : {};
+  const hadTutorialState = Object.prototype.hasOwnProperty.call(saved, "tutorialActive");
+  const hadTutorialResolution = Object.prototype.hasOwnProperty.call(saved, "tutorialResolved");
+  state.radar = { ...defaults, ...saved };
+  state.radar.unlocked = Boolean(state.radar.unlocked || state.unlocks?.radar_access);
+  state.radar.suspicion = Math.max(0, Math.min(100, Math.round(Number(state.radar.suspicion) || 0)));
+  state.radar.patrolCount = Math.max(0, Math.min(RADAR_MAX_PATROLS, Math.round(Number(state.radar.patrolCount) || 0)));
+  state.radar.fineLevel = Math.max(0, Math.min(RADAR_FINE_AMOUNTS.length - 1, Math.round(Number(state.radar.fineLevel) || 0)));
+  state.radar.powerOn = state.radar.powerOn !== false;
+  state.radar.demoPending = Boolean(state.radar.demoPending);
+  state.radar.demoConsumed = Boolean(state.radar.demoConsumed);
+  state.radar.tutorialActive = hadTutorialState ? Boolean(state.radar.tutorialActive) : state.radar.demoPending;
+  state.radar.tutorialResolved = hadTutorialResolution
+    ? Boolean(state.radar.tutorialResolved)
+    : Boolean(state.radar.demoConsumed && !state.radar.demoPending);
+  state.radar.tutorialOutcome = ["success", "failure"].includes(state.radar.tutorialOutcome)
+    ? state.radar.tutorialOutcome
+    : "";
+  const lastApproachDayFloat = Number(state.radar.lastApproachDayFloat);
+  state.radar.lastApproachDayFloat = Number.isFinite(lastApproachDayFloat) && lastApproachDayFloat >= 1
+    ? Number(lastApproachDayFloat.toFixed(4))
+    : null;
+  state.radar.approachesStarted = Math.max(0, Math.round(Number(state.radar.approachesStarted) || 0));
+  if (state.radar.unlocked && state.radar.lastApproachDayFloat === null) {
+    state.radar.lastApproachDayFloat = Number(currentInventoryDayFloat().toFixed(4));
+  }
+  state.radar.unlockConversationPending = Boolean(state.radar.unlockConversationPending);
+  state.radar.finesPaid = Math.max(0, Number(state.radar.finesPaid) || 0);
+  state.radar.detections = Math.max(0, Math.round(Number(state.radar.detections) || 0));
+  return state.radar;
+}
+
+function radarSnapshot() {
+  if (!state) {
+    return {
+      ...createDefaultRadarState(),
+      running: false,
+      clockRunning: false,
+      money: 0,
+      totalRevenue: 0,
+      day: 1,
+      dayFloat: 1
+    };
+  }
+  const radar = ensureRadarState();
+  return {
+    ...radar,
+    running: isRadarSimulationRunning(),
+    clockRunning: isGameTimeRunning(),
+    money: Number(state.money) || 0,
+    totalRevenue: Number(state.tradeStats?.revenue) || 0,
+    day: Number(state.day) || 1,
+    dayFloat: Number(currentInventoryDayFloat().toFixed(4))
+  };
+}
+
+function notifyRadarState() {
+  window.dispatchEvent(new CustomEvent("undergreen:radar-state", { detail: radarSnapshot() }));
+}
+
+function setRadarSuspicion(value) {
+  const radar = ensureRadarState();
+  radar.suspicion = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  notifyRadarState();
+  return radar.suspicion;
+}
+
+function addRadarSuspicion(amount) {
+  const delta = Math.max(0, Math.round(Number(amount) || 0));
+  if (!delta) return ensureRadarState().suspicion;
+  return setRadarSuspicion(ensureRadarState().suspicion + delta);
+}
+
+function radarPurchaseSuspicion(cost) {
+  return Math.max(1, Math.min(8, Math.ceil(Math.max(0, Number(cost) || 0) / 250)));
+}
+
+function radarShipmentSuspicion(qty, revenue) {
+  const volume = Math.ceil(Math.max(0, Number(qty) || 0) / 4);
+  const value = Math.floor(Math.max(0, Number(revenue) || 0) / 750);
+  return Math.max(1, Math.min(12, volume + value));
+}
+
+function setRadarPatrolCount(value, { relative = false } = {}) {
+  const radar = ensureRadarState();
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return radar.patrolCount;
+  const next = relative ? radar.patrolCount + parsed : parsed;
+  radar.patrolCount = Math.max(0, Math.min(RADAR_MAX_PATROLS, Math.round(next)));
+  notifyRadarState();
+  return radar.patrolCount;
+}
+
+function queueRadarDemo() {
+  const radar = ensureRadarState();
+  radar.unlocked = true;
+  radar.demoPending = true;
+  radar.demoConsumed = false;
+  radar.tutorialActive = true;
+  radar.tutorialResolved = false;
+  radar.tutorialOutcome = "";
+  radar.lastApproachDayFloat = Number(currentInventoryDayFloat().toFixed(4));
+  saveGame();
+  notifyRadarState();
+}
+
+function consumeRadarDemo() {
+  const radar = ensureRadarState();
+  if (!radar.demoPending) return false;
+  radar.demoPending = false;
+  radar.demoConsumed = true;
+  saveGame();
+  notifyRadarState();
+  return true;
+}
+
+function markRadarApproachStarted({ tutorial = false, guaranteed = false } = {}) {
+  const radar = ensureRadarState();
+  if (!radar.unlocked) return null;
+  const dayFloat = Number(currentInventoryDayFloat().toFixed(4));
+  radar.lastApproachDayFloat = dayFloat;
+  radar.approachesStarted += 1;
+  if (tutorial) radar.tutorialActive = true;
+  saveGame();
+  notifyRadarState();
+  return { dayFloat, tutorial: Boolean(tutorial), guaranteed: Boolean(guaranteed) };
+}
+
+function resolveRadarTutorial(outcome) {
+  const radar = ensureRadarState();
+  const normalizedOutcome = outcome === "success" ? "success" : outcome === "failure" ? "failure" : "";
+  if (!normalizedOutcome || (!radar.tutorialActive && radar.tutorialResolved)) return false;
+  radar.demoPending = false;
+  radar.demoConsumed = true;
+  radar.tutorialActive = false;
+  radar.tutorialResolved = true;
+  radar.tutorialOutcome = normalizedOutcome;
+  saveGame();
+  notifyRadarState();
+  window.setTimeout(() => {
+    if (!state || state.ended) return;
+    triggerComms(`radar_tutorial_${normalizedOutcome}`, {
+      target: "radar",
+      tutorialOutcome: normalizedOutcome
+    });
+  }, 0);
+  return true;
+}
+
+function setRadarPower(powerOn) {
+  const radar = ensureRadarState();
+  radar.powerOn = Boolean(powerOn);
+  saveGame();
+  notifyRadarState();
+  return radar.powerOn;
+}
+
+function applyRadarFine() {
+  const radar = ensureRadarState();
+  if (!radar.unlocked || !radar.powerOn || radar.tutorialActive) return null;
+  const fineIndex = Math.max(0, Math.min(RADAR_FINE_AMOUNTS.length - 1, radar.fineLevel));
+  const amount = RADAR_FINE_AMOUNTS[fineIndex];
+  state.money -= amount;
+  radar.fineLevel = Math.min(RADAR_FINE_AMOUNTS.length - 1, fineIndex + 1);
+  radar.finesPaid += amount;
+  radar.detections += 1;
+  setStatus("巡回官憲に検知され、罰金 C" + amount + "を徴収されました。", { log: false });
+  toast("検知ペナルティ -C" + amount, "error");
+  playSoundFirst(["alert", "failure"], 0.28);
+  pulseElement(document.getElementById("money-value"));
+  saveGame();
+  renderHeader();
+  notifyRadarState();
+  return { amount, money: state.money, fineLevel: radar.fineLevel };
+}
+
+function triggerPendingRadarUnlockConversation() {
+  if (!state || startScreenOpen) return false;
+  const radar = ensureRadarState();
+  if (!radar.unlockConversationPending || state.storySeen?.story_radar_unlocked) {
+    radar.unlockConversationPending = false;
+    return false;
+  }
+  radar.unlockConversationPending = false;
+  triggerComms("radar_unlocked", {
+    unlockId: "radar_access",
+    unlockType: "radar",
+    unlockTarget: "radar",
+    target: "radar"
+  });
+  saveGame();
+  notifyRadarState();
+  return true;
+}
+
+window.UndergreenRadar = {
+  getSnapshot: radarSnapshot,
+  setPower: setRadarPower,
+  applyFine: applyRadarFine,
+  consumeDemo: consumeRadarDemo,
+  markApproachStarted: markRadarApproachStarted,
+  resolveTutorial: resolveRadarTutorial,
+  setPatrolCount: setRadarPatrolCount,
+  setSuspicion: setRadarSuspicion
+};
+
 function createInitialState(mode = "day45") {
   const initialProperty = createInitialSafeRoom();
   initialProperty.ownedAt = Date.now();
@@ -1687,6 +1938,7 @@ function createInitialState(mode = "day45") {
     equipment: { tanks: 0, filter: false, fridge: false },
     supportOS: { harvest: false, planting: false, cleaning: false },
     automation: createDefaultSupportAutomation(),
+    radar: createDefaultRadarState(),
     resourceRemainders: { water: 0, nutrient: 0 },
     dayProgress: 0,
     paused: false,
@@ -2101,6 +2353,23 @@ function allMarketsUnlocked() {
   return marketIds.length > 0 && marketIds.every((marketId) => Boolean(state.marketUnlocked?.[marketId]));
 }
 
+function migrateLegacyAutomationEvaluationTiming() {
+  if (allMarketsUnlocked()) return false;
+  const storyId = "story_automation_evaluation";
+  const hasLegacyProgress = Boolean(
+    state.unlocks?.automation_os_evaluation
+    || state.storySeen?.[storyId]
+    || state.storyChoices?.[storyId]
+    || state.storyOpen?.some((entry) => entry?.id === storyId)
+  );
+  if (!hasLegacyProgress) return false;
+  delete state.unlocks.automation_os_evaluation;
+  delete state.storySeen[storyId];
+  delete state.storyChoices[storyId];
+  state.storyOpen = state.storyOpen.filter((entry) => entry?.id !== storyId);
+  return true;
+}
+
 function startTitleTrackingIfReady() {
   const tracking = ensureTitleTrackingState();
   if (tracking.started || !allMarketsUnlocked()) return false;
@@ -2137,12 +2406,16 @@ function progressionValue(key) {
   if (key === "shopUnlocked") return state.shopUnlocked;
   if (key === "marketTabUnlocked") return state.marketTabUnlocked;
   if (key === "automationTabUnlocked") return state.automationTabUnlocked;
+  if (key === "allMarketsUnlocked") return allMarketsUnlocked();
   if (key === "brokerUnlocked") return state.brokerUnlocked;
   if (key === "timeUnlocked") return state.timeUnlocked;
   if (key === "revenue") return state.tradeStats?.revenue || 0;
   if (key === "unitsSold") return state.tradeStats?.unitsSold || 0;
   if (key === "money") return state.money || 0;
   if (key === "baseCount") return ownedBases().length;
+  if (key === "radarUnlocked") return ensureRadarState().unlocked;
+  if (key === "suspicion") return ensureRadarState().suspicion;
+  if (key === "radarPatrols") return ensureRadarState().patrolCount;
   if (key.startsWith("marketUnlocked:")) return Boolean(state.marketUnlocked?.[key.split(":")[1]]);
   if (key.startsWith("marketRevenue:")) return state.tradeStats?.byMarket?.[key.split(":")[1]] || 0;
   if (key.startsWith("cropSold:")) return state.tradeStats?.byCrop?.[key.split(":")[1]] || 0;
@@ -2180,6 +2453,10 @@ function applyUnlock(rule) {
   if (rule.type === "tab" && rule.target === "shop") state.shopUnlocked = true;
   if (rule.type === "tab" && rule.target === "market") state.marketTabUnlocked = true;
   if (rule.type === "tab" && rule.target === "automation") state.automationTabUnlocked = true;
+  if (rule.type === "radar") {
+    ensureRadarState().unlocked = true;
+    notifyRadarState();
+  }
 }
 
 function updateProgressionUnlocks({ silent = false } = {}) {
@@ -2431,6 +2708,7 @@ function loadGame() {
   state.tradeStats.foodToRebels ||= 0;
   state.tradeStats.weaponsToRebels ||= 0;
   state.marketUnlocked = { lower: true, medical: false, upper: false, rebel: false, ...(state.marketUnlocked || {}) };
+  migrateLegacyAutomationEvaluationTiming();
   state.automationTabUnlocked = Boolean(state.automationTabUnlocked);
   ensureTitleTrackingState();
   const pendingResult = state.pendingDay30Result;
@@ -2463,6 +2741,10 @@ function loadGame() {
   ensureProcurementTags();
   state.marketTabUnlocked = Boolean(state.marketTabUnlocked || state.tradeStats?.unitsSold > 0);
   state.automationTabUnlocked = Boolean(state.automationTabUnlocked || state.unlocks.automation_os_access);
+  ensureRadarState();
+  if (!state.unlocks.radar_access && (Number(state.tradeStats?.revenue) || 0) >= 250 && !state.storySeen.story_radar_unlocked) {
+    state.radar.unlockConversationPending = true;
+  }
   state.shopUnlocked = Boolean(state.shopUnlocked);
   state.brokerUnlocked = Boolean(state.brokerUnlocked);
   if (state.timeUnlocked === undefined) {
@@ -2654,9 +2936,15 @@ function ensureSupportRobotProfile(device) {
     enabled: harvestSource.enabled !== false
   };
   const plantingSource = device.plantingAutomation || device.automation?.planting || {};
+  const shortageNoticeAtDay = plantingSource.shortageNoticeAtDay === null
+    || plantingSource.shortageNoticeAtDay === undefined
+    ? null
+    : Number(plantingSource.shortageNoticeAtDay);
   device.plantingAutomation = {
     enabled: Boolean(plantingSource.enabled),
-    cropId: CROPS[plantingSource.cropId] ? plantingSource.cropId : "lettuce"
+    cropId: CROPS[plantingSource.cropId] ? plantingSource.cropId : "lettuce",
+    shortageNoticeKey: typeof plantingSource.shortageNoticeKey === "string" ? plantingSource.shortageNoticeKey : "",
+    shortageNoticeAtDay: Number.isFinite(shortageNoticeAtDay) ? shortageNoticeAtDay : null
   };
   return device;
 }
@@ -3420,6 +3708,7 @@ function rerollMonthlySchedule() {
     return;
   }
   state.money -= SCHEDULE_REROLL_COST;
+  addRadarSuspicion(radarPurchaseSuspicion(SCHEDULE_REROLL_COST));
   state.monthlySchedule = generateMonthlySchedule();
   applyScheduleMarketSignals();
   state.log = "LOWNET rumors reinvestigated. Monthly schedule updated.";
@@ -4654,6 +4943,21 @@ function isCommsBlocking() {
   return Boolean(activeStory?.event?.blocking || activeComms?.event?.blocking);
 }
 
+function isRadarSimulationRunning() {
+  return Boolean(
+    state
+    && state.timeUnlocked
+    && !state.paused
+    && !state.ended
+    && !startScreenOpen
+    && !isCommsBlocking()
+  );
+}
+
+function isGameTimeRunning() {
+  return Boolean(isRadarSimulationRunning() && !state.radar?.tutorialActive);
+}
+
 function isCommsInteractionTarget(target) {
   return Boolean(target?.closest?.("#story-comms-overlay, #comms-banner, #modal-backdrop, #toast-container, #confirm-widget, #start-screen"));
 }
@@ -4705,6 +5009,22 @@ function runCommsEffect(effect) {
   }
   if (effect.action === "guide" && effect.value) {
     setUiGuide(effect.value, { persist: false });
+    return;
+  }
+  if (effect.action === "radar_demo") {
+    queueRadarDemo();
+    return;
+  }
+  if (effect.action === "radar_patrols" && effect.value) {
+    const rawValue = String(effect.value).trim();
+    setRadarPatrolCount(Number(rawValue), { relative: /^[+-]/.test(rawValue) });
+    return;
+  }
+  if (effect.action === "radar_suspicion" && effect.value) {
+    const rawValue = String(effect.value).trim();
+    const value = Number(rawValue);
+    if (/^[+-]/.test(rawValue)) setRadarSuspicion(ensureRadarState().suspicion + value);
+    else setRadarSuspicion(value);
     return;
   }
   if (effect.action === "clear_guide") {
@@ -4781,6 +5101,64 @@ function marketLabel(marketId) {
 
 function cropLabel(cropId) {
   return CROPS[cropId]?.name || cropId || "---";
+}
+
+function resultRankingStats(record = {}) {
+  const hasTrackedRanking = [
+    "titleTrackingStartedAtRevenue",
+    "titleByCrop",
+    "titleByMarket",
+    "titleByMarketQty"
+  ].some((key) => Object.prototype.hasOwnProperty.call(record, key));
+  if (!hasTrackedRanking) {
+    return {
+      scopeLabel: "旧集計",
+      trackingStarted: true,
+      topCropId: record.topCropId || null,
+      topCropQty: Math.max(0, Number(record.topCropQty) || 0),
+      topMarketRevenueId: record.topMarketRevenueId || null,
+      topMarketRevenue: Math.max(0, Number(record.topMarketRevenue) || 0),
+      topMarketQtyId: record.topMarketQtyId || null,
+      topMarketQty: Math.max(0, Number(record.topMarketQty) || 0)
+    };
+  }
+
+  const trackingStarted = record.titleTrackingStartedAtRevenue !== null
+    && record.titleTrackingStartedAtRevenue !== undefined;
+  const [derivedCropId, derivedCropQty] = topEntry(record.titleByCrop || {});
+  const [derivedMarketRevenueId, derivedMarketRevenue] = topEntry(record.titleByMarket || {});
+  const [derivedMarketQtyId, derivedMarketQty] = topEntry(record.titleByMarketQty || {});
+  return {
+    scopeLabel: "全市場解放後",
+    trackingStarted,
+    topCropId: trackingStarted ? (record.titleTopCropId || derivedCropId || null) : null,
+    topCropQty: trackingStarted ? Math.max(0, Number(record.titleTopCropQty ?? derivedCropQty) || 0) : 0,
+    topMarketRevenueId: trackingStarted ? (record.titleTopMarketRevenueId || derivedMarketRevenueId || null) : null,
+    topMarketRevenue: trackingStarted ? Math.max(0, Number(record.titleTopMarketRevenue ?? derivedMarketRevenue) || 0) : 0,
+    topMarketQtyId: trackingStarted ? (record.titleTopMarketQtyId || derivedMarketQtyId || null) : null,
+    topMarketQty: trackingStarted ? Math.max(0, Number(record.titleTopMarketQty ?? derivedMarketQty) || 0) : 0
+  };
+}
+
+function resultRankingCropText(record = {}) {
+  const ranking = resultRankingStats(record);
+  if (!ranking.trackingStarted) return "未計測（全市場未解放）";
+  if (!ranking.topCropId || ranking.topCropQty <= 0) return "記録なし";
+  return `${cropLabel(ranking.topCropId)} x${formatNumber(ranking.topCropQty)}`;
+}
+
+function resultRankingMarketRevenueText(record = {}) {
+  const ranking = resultRankingStats(record);
+  if (!ranking.trackingStarted) return "未計測（全市場未解放）";
+  if (!ranking.topMarketRevenueId || ranking.topMarketRevenue <= 0) return "記録なし";
+  return `${marketLabel(ranking.topMarketRevenueId)} ₡${formatNumber(ranking.topMarketRevenue)}`;
+}
+
+function resultRankingMarketQtyText(record = {}) {
+  const ranking = resultRankingStats(record);
+  if (!ranking.trackingStarted) return "未計測（全市場未解放）";
+  if (!ranking.topMarketQtyId || ranking.topMarketQty <= 0) return "記録なし";
+  return `${marketLabel(ranking.topMarketQtyId)} x${formatNumber(ranking.topMarketQty)}`;
 }
 
 function day30Titles(summary) {
@@ -5655,6 +6033,7 @@ function refreshPropertyListings() {
     return;
   }
   state.money -= fee;
+  addRadarSuspicion(radarPurchaseSuspicion(fee));
   state.propertyListings = generatePropertyListings(PROPERTY_LISTING_COUNT);
   setStatus(`不動産ブローカーへ更新料 ₡${PROPERTY_REROLL_FEE}を支払い、新しい物件情報を取得しました。`);
   playSound("property_refresh");
@@ -5668,6 +6047,7 @@ function refreshProcurementLineup() {
     return;
   }
   state.money -= PROCUREMENT_REROLL_FEE;
+  addRadarSuspicion(radarPurchaseSuspicion(PROCUREMENT_REROLL_FEE));
   state.procurementTags = {};
   ensureProcurementTags();
   setStatus(`マラへ更新料 ₡${PROCUREMENT_REROLL_FEE}を支払い、タグ付き設備ラインナップを引き直しました。`);
@@ -5709,6 +6089,7 @@ function contractProperty(propertyId) {
     return;
   }
   state.money -= property.price;
+  addRadarSuspicion(radarPurchaseSuspicion(property.price));
   const newBase = normalizeBase({ ...property, price: 0, shelves: [], floorDevices: [], ownedAt: Date.now() });
   state.bases.push(newBase);
   trackPurchase("property", propertyId, property.price, { itemName: property.name, width: newBase.width, height: newBase.height, tier: newBase.tier });
@@ -6037,6 +6418,7 @@ function buySeed(cropId) {
     return;
   }
   state.money -= crop.seedPrice;
+  addRadarSuspicion(radarPurchaseSuspicion(crop.seedPrice));
   state.seeds[cropId] += crop.packSize;
   trackPurchase("seed", cropId, crop.seedPrice, { itemName: crop.name, packSize: crop.packSize });
   selectedSeed = cropId;
@@ -6084,6 +6466,7 @@ function buyEquipment(itemId) {
   }
 
   state.money -= price;
+  addRadarSuspicion(radarPurchaseSuspicion(price));
   if (itemId === "water") state.water += 10;
   if (itemId === "nutrient") state.nutrient = Math.min(state.nutrientCapacity, state.nutrient + 10);
   if (GROW_UNITS[itemId]) {
@@ -6348,6 +6731,7 @@ function finishManualSale(results, options = {}) {
   const premiumSale = validResults.some((result) => result.premium);
   const marketId = representative.marketId;
   const fromMoney = validResults[0].fromMoney;
+  addRadarSuspicion(radarShipmentSuspicion(totalQty, totalRevenue));
 
   validResults.forEach(updateSaleRowAfterTransaction);
   updateInventorySummary();
@@ -6643,7 +7027,11 @@ function plantSeedByRobot(base, unit, slotIndex, cropId, robot) {
   if (!crop || !unit?.placed || unit.slots?.[slotIndex]) return false;
   if ((state.seeds[cropId] || 0) <= 0) return false;
   const plantingCost = plantingResourceCost(cropId, unit);
-  if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) return false;
+  if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) {
+    notifySupportPlantingShortage(base, robot, cropId, unit, plantingCost);
+    return false;
+  }
+  clearSupportPlantingShortageNotice(robot);
   state.water -= plantingCost.water;
   state.nutrient -= plantingCost.nutrient;
   state.seeds[cropId] -= 1;
@@ -6701,6 +7089,7 @@ function buySeedsByRobot() {
   const [cropId] = entry;
   const crop = CROPS[cropId];
   state.money -= crop.seedPrice;
+  addRadarSuspicion(radarPurchaseSuspicion(crop.seedPrice));
   state.seeds[cropId] = (state.seeds[cropId] || 0) + crop.packSize;
   trackPurchase("seed", cropId, crop.seedPrice, { itemName: crop.name, packSize: crop.packSize, automated: true });
   botActionLog(`BOT // ${crop.name} seed pack purchased.`);
@@ -6736,6 +7125,7 @@ function sellInventoryByRobot(cropId, marketId) {
 
   if (totalQty <= 0) return false;
   state.money += totalRevenue;
+  addRadarSuspicion(radarShipmentSuspicion(totalQty, totalRevenue));
   state.inventory = state.inventory.filter((item) => item.crop !== cropId || item.qty > 0);
   state.tradeStats.byCrop ||= {};
   state.tradeStats.byMarket ||= { lower: 0, medical: 0, upper: 0, rebel: 0 };
@@ -6783,19 +7173,66 @@ function findSupportHarvestTarget(base, robot) {
   return null;
 }
 
+function clearSupportPlantingShortageNotice(robot) {
+  if (!robot?.plantingAutomation) return;
+  robot.plantingAutomation.shortageNoticeKey = "";
+  robot.plantingAutomation.shortageNoticeAtDay = null;
+}
+
+function notifySupportPlantingShortage(base, robot, cropId, unit, plantingCost) {
+  ensureSupportRobotProfile(robot);
+  const context = {
+    ...resourceShortageContext(cropId, unit, plantingCost),
+    automated: true,
+    baseId: base?.id || "",
+    robotId: robot?.id || ""
+  };
+  const noticeKey = `${cropId}:${unit?.type || "unit"}:${plantingShortageReason(context)}`;
+  const currentDay = (Number(state.day) || 1) + Math.max(0, Number(state.dayProgress) || 0);
+  const previousDay = Number(robot.plantingAutomation.shortageNoticeAtDay);
+  const recentlyNotified = robot.plantingAutomation.shortageNoticeKey === noticeKey
+    && Number.isFinite(previousDay)
+    && currentDay - previousDay < SUPPORT_PLANT_SHORTAGE_NOTICE_DAYS;
+  if (recentlyNotified) return false;
+
+  robot.plantingAutomation.shortageNoticeKey = noticeKey;
+  robot.plantingAutomation.shortageNoticeAtDay = currentDay;
+  trackPlantingFailure(plantingShortageReason(context), context);
+  triggerComms("plant_resource_shortage", context);
+  return true;
+}
+
 function findSupportPlantingTarget(base, robot) {
   ensureSupportRobotProfile(robot);
   const planting = robot.plantingAutomation || {};
-  if (!state.supportOS?.planting || !planting.enabled) return null;
+  if (!state.supportOS?.planting || !planting.enabled) {
+    clearSupportPlantingShortageNotice(robot);
+    return null;
+  }
   const cropId = CROPS[planting.cropId] ? planting.cropId : "lettuce";
-  if ((state.seeds[cropId] || 0) <= 0) return null;
+  if ((state.seeds[cropId] || 0) <= 0) {
+    clearSupportPlantingShortageNotice(robot);
+    return null;
+  }
+
+  let shortageTarget = null;
   for (const unit of base.shelves) {
     if (!unit.placed || !supportRobotCanReach(robot, unit, "unit")) continue;
     const slotIndex = unit.slots.findIndex((plant) => !plant);
     if (slotIndex < 0) continue;
     const plantingCost = plantingResourceCost(cropId, unit);
-    if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) return null;
+    if (state.water < plantingCost.water || state.nutrient < plantingCost.nutrient) {
+      if (!shortageTarget) shortageTarget = { unit, plantingCost };
+      continue;
+    }
+    clearSupportPlantingShortageNotice(robot);
     return { unit, slotIndex, cropId };
+  }
+
+  if (shortageTarget) {
+    notifySupportPlantingShortage(base, robot, cropId, shortageTarget.unit, shortageTarget.plantingCost);
+  } else {
+    clearSupportPlantingShortageNotice(robot);
   }
   return null;
 }
@@ -7135,7 +7572,7 @@ function realtimeTick() {
     }
     return;
   }
-  if (state.ended || state.paused) {
+  if (state.ended || state.paused || state.radar?.tutorialActive) {
     if (now - lastRenderAt >= 500) {
       renderRuntime();
       lastRenderAt = now;
@@ -7362,11 +7799,12 @@ function compactTimelineSummary(record = {}) {
 
 function compactRecordForGoogleForm(record) {
   if (!record) return "LATEST: -";
+  const ranking = resultRankingStats(record);
   const lines = [
     `[${record.runLabel || record.id || "RUN"}] ${record.modeLabel || record.mode || "MODE"}`,
     `player=${record.playerName || "未記名"} / day=${record.day || 0}${record.completed ? " / completed" : " / unfinished"}`,
     `money=C${formatNumber(record.money || 0)} / revenue=C${formatNumber(record.revenue || 0)} / units=${formatNumber(record.unitsSold || 0)} / avg=C${formatNumber(record.averageUnitPrice || 0)}`,
-    `topCrop=${cropLabel(record.topCropId)} x${formatNumber(record.topCropQty || 0)} / topMarketRevenue=${marketLabel(record.topMarketRevenueId)} C${formatNumber(record.topMarketRevenue || 0)} / topMarketQty=${marketLabel(record.topMarketQtyId)} x${formatNumber(record.topMarketQty || 0)}`,
+    `rankingScope=${ranking.scopeLabel} / topCrop=${resultRankingCropText(record)} / topMarketRevenue=${resultRankingMarketRevenueText(record)} / topMarketQty=${resultRankingMarketQtyText(record)}`,
     `equipment=${formatNumber(record.equipmentCount || 0)} / property=${formatNumber(record.propertyCount || 0)} / elapsed=${formatNumber(record.analytics?.elapsedSec || 0)}sec`,
     `crops=${compactMapSummary(record.byCrop, cropLabel)}`,
     `markets(amount)=${compactMapSummary(record.byMarket, marketLabel)}`,
@@ -7919,6 +8357,7 @@ function day30ReportMarkup(summary) {
   const config = playModeConfig(summary.mode);
   const status = summary.completed ? "完走" : "途中終了";
   const modeName = config.label;
+  const rankingScope = resultRankingStats(summary).scopeLabel;
   return `<p class="modal-copy">${escapeHtml(modeName)}の記録を保存しました。名前はこの端末の記録一覧に表示されます。</p>
   <label class="day30-name-field">
     <span>PLAYER NAME</span>
@@ -7927,10 +8366,10 @@ function day30ReportMarkup(summary) {
   <div class="modal-report">
     <div><span>到達</span><strong>${status} / DAY ${summary.day}</strong></div>
     <div><span>累計稼得金額</span><strong>₡${formatNumber(summary.revenue)}</strong></div>
-    <div><span>最多作物</span><strong>${cropLabel(summary.topCropId)} x${summary.topCropQty || 0}</strong></div>
+    <div><span>最多作物（${rankingScope}）</span><strong>${resultRankingCropText(summary)}</strong></div>
     <div><span>設備 / 不動産</span><strong>${summary.equipmentCount} / ${summary.propertyCount}</strong></div>
-    <div><span>最多市場(金)</span><strong>${marketLabel(summary.topMarketRevenueId)} ₡${formatNumber(summary.topMarketRevenue)}</strong></div>
-    <div><span>最多市場(量)</span><strong>${marketLabel(summary.topMarketQtyId)} x${summary.topMarketQty || 0}</strong></div>
+    <div><span>最多市場(金・${rankingScope})</span><strong>${resultRankingMarketRevenueText(summary)}</strong></div>
+    <div><span>最多市場(量・${rankingScope})</span><strong>${resultRankingMarketQtyText(summary)}</strong></div>
   </div>
   <p class="modal-copy">称号: ${summary.titles.length ? summary.titles.join(" / ") : "なし"}</p>
   <div class="day30-share-actions">
@@ -8309,6 +8748,7 @@ function closeStartScreen() {
     clearCommsForTrigger("game_start");
   }
   if (isFreshOperationState() || activeComms) triggerComms("game_start");
+  triggerPendingRadarUnlockConversation();
 }
 
 function updateStartScreen() {
@@ -8371,10 +8811,11 @@ function renderDay30Records() {
 
     const sub = document.createElement("div");
     sub.className = "day30-record-sub";
+    const rankingScope = resultRankingStats(record).scopeLabel;
     [
-      `最多作物 ${cropLabel(record.topCropId)} x${record.topCropQty || 0}`,
-      `市場(金) ${marketLabel(record.topMarketRevenueId)}`,
-      `市場(量) ${marketLabel(record.topMarketQtyId)}`,
+      `最多作物(${rankingScope}) ${resultRankingCropText(record)}`,
+      `市場(金・${rankingScope}) ${resultRankingMarketRevenueText(record)}`,
+      `市場(量・${rankingScope}) ${resultRankingMarketQtyText(record)}`,
       `設備 ${record.equipmentCount || 0}`,
       `物件 ${record.propertyCount || 0}`
     ].forEach((textValue) => {
@@ -8677,6 +9118,18 @@ function renderHeader() {
     : "DAY HOLD";
   renderResourceAlert("water", state.water, resourceDemand().water);
   renderResourceAlert("nutrient", state.nutrient, resourceDemand().nutrient);
+  const radar = ensureRadarState();
+  const suspicionCard = document.getElementById("radar-suspicion-card");
+  const suspicionValue = document.getElementById("radar-suspicion-value");
+  const suspicionLabel = document.getElementById("radar-suspicion-label");
+  const suspicionFill = document.getElementById("radar-suspicion-fill");
+  if (suspicionValue) suspicionValue.textContent = String(radar.suspicion);
+  if (suspicionFill) suspicionFill.style.width = String(radar.suspicion) + "%";
+  if (suspicionLabel) suspicionLabel.textContent = radar.suspicion >= 60 ? "HIGH" : radar.suspicion >= 25 ? "WATCH" : "CLEAR";
+  if (suspicionCard) {
+    suspicionCard.classList.toggle("radar-warning", radar.suspicion >= 25 && radar.suspicion < 60);
+    suspicionCard.classList.toggle("radar-danger", radar.suspicion >= 60);
+  }
   renderNewsHistory();
   updateFullscreenButton();
 }
@@ -8836,7 +9289,7 @@ function renderFarm() {
     const deviceLabel = device.type === "light" ? "LED" : device.type === "fan" ? "FAN" : definition.code || definition.name;
     return `<button class="facility-item floor-device device-${device.type} device-running ${needsCleaning(device) ? "needs-cleaning" : ""} ${selectedDeviceId === device.id ? "selected" : ""}"
       style="grid-column:${device.x + 1};grid-row:${device.y + 1};z-index:${20 + device.y}" data-select-device="${device.id}" data-drag-kind="device" data-drag-id="${device.id}">
-      <img class="equipment-sprite" src="${definition.sprite}" alt="" draggable="false"><span class="device-field"></span><span class="item-label">${deviceLabel}</span>
+      <img class="equipment-sprite" src="${freshCharacterAssetUrl(definition.sprite)}" alt="" draggable="false"><span class="device-field"></span><span class="item-label">${deviceLabel}</span>
     </button>`;
   }).join("");
 

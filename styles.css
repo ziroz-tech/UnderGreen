@@ -278,7 +278,7 @@ body.ui-scale-large .screen {
 
 .resource-strip {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 1px;
   margin: 12px 0 12px;
   padding: 1px;
@@ -354,6 +354,79 @@ body.ui-scale-large .screen {
 
 .nutrient-icon {
   color: var(--yellow);
+}
+
+.radar-suspicion-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.radar-suspicion-icon {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-size: 0;
+}
+
+.radar-suspicion-icon::before {
+  content: "!";
+  font: 900 18px Consolas, monospace;
+  transform: rotate(-45deg);
+}
+
+.radar-suspicion-readout {
+  flex: 1;
+  min-width: 0;
+}
+
+.radar-suspicion-readout strong {
+  display: block;
+  color: var(--cyan);
+}
+
+.radar-suspicion-meter {
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 5px;
+  overflow: hidden;
+  background: rgba(72, 219, 234, 0.14);
+}
+
+.radar-suspicion-meter i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--cyan);
+  transition: width 180ms ease, background 180ms ease;
+}
+
+.radar-suspicion-card.radar-warning {
+  background: rgba(76, 58, 10, 0.78);
+}
+
+.radar-suspicion-card.radar-warning .radar-suspicion-icon,
+.radar-suspicion-card.radar-warning strong,
+.radar-suspicion-card.radar-warning small {
+  color: var(--yellow);
+}
+
+.radar-suspicion-card.radar-warning .radar-suspicion-meter i {
+  background: var(--yellow);
+}
+
+.radar-suspicion-card.radar-danger {
+  background: rgba(87, 15, 28, 0.76);
+  animation: resource-alert 0.85s steps(2) infinite;
+}
+
+.radar-suspicion-card.radar-danger .radar-suspicion-icon,
+.radar-suspicion-card.radar-danger strong,
+.radar-suspicion-card.radar-danger small {
+  color: #ff9bab;
+}
+
+.radar-suspicion-card.radar-danger .radar-suspicion-meter i {
+  background: var(--red);
 }
 
 .resource-card small {
@@ -3170,19 +3243,12 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   box-shadow: none;
 }
 
-.qty-control button:disabled {
-  color: #41564e;
-  cursor: not-allowed;
-}
-
-
 .inventory-empty {
   padding: 36px 10px;
   color: var(--muted);
   font: 11px Consolas, monospace;
   text-align: center;
 }
-
 
 .inventory-row {
   display: grid;
@@ -4131,7 +4197,7 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   right: max(24px, calc((100vw - 1436px) / 2 + 24px));
   bottom: 98px;
   display: grid;
-  grid-template-columns: 210px minmax(360px, 560px);
+  grid-template-columns: 248px minmax(360px, 560px);
   overflow: hidden;
   max-width: calc(100vw - 48px);
   border: 1px solid rgba(72, 219, 234, .55);
@@ -4165,6 +4231,7 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   right: 50%;
   bottom: 34%;
   transform: translate(50%, 50%);
+  grid-template-columns: 292px minmax(360px, 560px);
   animation: comms-modal-in .18s ease-out;
   box-shadow: 0 26px 90px rgba(0, 0, 0, .68), 0 0 44px rgba(72, 219, 234, .18);
 }
@@ -4174,21 +4241,50 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 }
 
 .comms-speaker {
-  display: grid;
-  grid-template-columns: 62px 1fr;
-  gap: 10px;
-  align-items: center;
-  padding: 14px;
+  position: relative;
+  display: block;
+  min-height: 236px;
+  padding: 0;
+  overflow: hidden;
   border-right: 1px solid rgba(72, 219, 234, .24);
   background: rgba(72, 219, 234, .08);
 }
 
 .comms-speaker img {
-  width: 62px;
-  height: 62px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border: 1px solid rgba(72, 219, 234, .4);
+  object-position: center top;
+  border: 0;
   background: rgba(0, 0, 0, .3);
+  filter: saturate(.92) contrast(1.04);
+}
+
+/* ポートレート上の走査線と枠光 (既存UIの質感に合わせる) */
+.comms-speaker::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, .16) 0 1px, transparent 1px 4px),
+    linear-gradient(160deg, rgba(72, 219, 234, .1), transparent 40%);
+  box-shadow: inset 0 0 0 1px rgba(72, 219, 234, .22);
+}
+
+/* 話者情報は画像下部にオーバーレイ */
+.comms-speaker > div {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  padding: 26px 12px 11px;
+  background: linear-gradient(180deg, transparent, rgba(4, 14, 16, .72) 34%, rgba(4, 14, 16, .95));
+  border-top: 1px solid rgba(72, 219, 234, .28);
 }
 
 .comms-speaker small,
@@ -4201,9 +4297,11 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 
 .comms-speaker strong {
   display: block;
-  margin: 4px 0;
+  margin: 4px 0 2px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 16px;
+  letter-spacing: .04em;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
 }
 
 .comms-speaker span {
@@ -4223,7 +4321,8 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 
 .comms-title-row h3 {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: 17px;
+  letter-spacing: .03em;
 }
 
 .comms-close {
@@ -4236,11 +4335,11 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 }
 
 .comms-body p {
-  min-height: 42px;
+  min-height: 64px;
   margin: 0 0 10px;
-  color: #d6e8de;
-  font-size: 12px;
-  line-height: 1.75;
+  color: #e4f4ea;
+  font-size: 14.5px;
+  line-height: 1.9;
 }
 
 .comms-progress {
@@ -4268,6 +4367,130 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
 .comms-actions button:hover {
   border-color: var(--green-bright);
   background: rgba(114, 255, 184, .16);
+}
+
+.comms-banner.blocking .comms-speaker {
+  min-height: 296px;
+}
+
+/* 本文が短くても立ち絵の高さを保つ */
+.comms-body {
+  min-height: 236px;
+  display: flex;
+  flex-direction: column;
+}
+
+.comms-body p {
+  flex: 1;
+}
+
+@media (max-width: 680px) {
+  .comms-banner,
+  .comms-banner.blocking {
+    grid-template-columns: 1fr;
+  }
+  .comms-speaker,
+  .comms-banner.blocking .comms-speaker {
+    min-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(72, 219, 234, .24);
+  }
+  .comms-speaker img {
+    object-position: center 18%;
+  }
+  .comms-body {
+    min-height: 0;
+  }
+}
+
+
+
+/* ============ 通信演出 (comms-fx.js がクラスを制御) ============ */
+
+/* 常時: ごく薄い干渉ノイズが揺らぐ */
+.comms-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(140, 240, 255, .028) 0 1px, transparent 1px 3px);
+  animation: comms-interference 5.5s linear infinite;
+}
+
+@keyframes comms-interference {
+  0%, 100% { opacity: .5; transform: translateY(0); }
+  48% { opacity: .9; }
+  50% { opacity: .25; transform: translateY(1px); }
+  52% { opacity: .9; }
+}
+
+.comms-banner { position: fixed; } /* 明示 (既存値の再宣言) */
+
+/* 着信時: 走査バーが上から下へ一度流れる */
+.comms-banner.comms-fx-in::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -12%;
+  height: 26px;
+  z-index: 4;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(72, 219, 234, .3) 45%, rgba(72, 219, 234, .55) 50%, rgba(72, 219, 234, .3) 55%, transparent);
+  animation: comms-scanbar .7s ease-in forwards;
+}
+
+@keyframes comms-scanbar {
+  from { top: -12%; }
+  to { top: 112%; }
+}
+
+/* 着信時: ウィンドウ全体の同調グリッチ */
+.comms-banner.comms-fx-in {
+  animation: comms-slide-in .22s ease-out, comms-sync-glitch .5s steps(1) .05s;
+}
+
+@keyframes comms-sync-glitch {
+  0% { transform: translateX(0); filter: none; }
+  12% { transform: translateX(-2px) skewX(.6deg); filter: hue-rotate(24deg) brightness(1.3); }
+  22% { transform: translateX(2px); filter: none; }
+  34% { transform: translateX(-1px) skewX(-.4deg); filter: brightness(1.5) contrast(1.2); }
+  46% { transform: translateX(0); filter: none; }
+  70% { transform: translateX(1px); filter: hue-rotate(-16deg); }
+  80%, 100% { transform: translateX(0); filter: none; }
+}
+
+/* blocking時は中央固定のtransformと競合するため位置transformを保持 */
+.comms-banner.blocking.comms-fx-in {
+  animation: comms-modal-in .18s ease-out;
+}
+
+/* 着信時: 立ち絵が信号同期でちらつく */
+.comms-fx-in .comms-speaker img {
+  animation: comms-portrait-sync .55s steps(2);
+}
+
+@keyframes comms-portrait-sync {
+  0% { filter: saturate(0) brightness(2.2) contrast(2); transform: translateX(-2px); }
+  35% { filter: saturate(.4) brightness(1.4); transform: translateX(1px); }
+  60% { filter: saturate(.92) contrast(1.04) hue-rotate(30deg); transform: none; }
+  100% { filter: saturate(.92) contrast(1.04); }
+}
+
+/* ページ送りごと: 本文がデコードされながら表示 */
+#comms-text.comms-text-in {
+  animation: comms-decode .42s ease-out;
+}
+
+#comms-title.comms-text-in {
+  animation: comms-decode .32s ease-out;
+}
+
+@keyframes comms-decode {
+  0% { opacity: .05; filter: blur(4px); letter-spacing: .1em; transform: translateY(3px); }
+  55% { opacity: 1; filter: blur(1px); }
+  100% { opacity: 1; filter: blur(0); letter-spacing: normal; transform: none; }
 }
 
 @keyframes comms-slide-in {
@@ -5339,7 +5562,7 @@ body.equipment-drag-active .facility-cell.covered-support_robot {
   }
 
   .resource-strip {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     margin: 9px 0 7px;
   }
 
@@ -8309,6 +8532,7 @@ html.apple-touch-device .ios-input-diagnostic pre {
     max-height: calc(30vh - 34px);
   }
 }
+
 /* Day-limit result presentation, adapted from ref/neon.css and ref/fx (1).js. */
 #result-fx-canvas {
   position: fixed;
@@ -8770,3 +8994,4 @@ html.apple-touch-device .ios-input-diagnostic pre {
     min-width: 0;
   }
 }
+

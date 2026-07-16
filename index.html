@@ -6,7 +6,8 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=208">
+    <link rel="stylesheet" href="styles.css?v=20260716a">
+  <link rel="stylesheet" href="radar.css?v=20260716a">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -63,6 +64,14 @@
       <div class="resource-card">
         <img class="resource-image" src="assets/icons/shelf.webp" alt="">
         <div><small>GROW CAPACITY</small><strong><span id="slot-value">0</span><i> SLOT</i></strong></div>
+      </div>
+      <div class="resource-card radar-suspicion-card" id="radar-suspicion-card">
+        <span class="resource-icon radar-suspicion-icon" aria-hidden="true">!</span>
+        <div class="radar-suspicion-readout">
+          <small>警戒度 <b id="radar-suspicion-label">CLEAR</b></small>
+          <strong><span id="radar-suspicion-value">0</span><i> / 100</i></strong>
+          <span class="radar-suspicion-meter" aria-hidden="true"><i id="radar-suspicion-fill"></i></span>
+        </div>
       </div>
     </section>
 
@@ -406,6 +415,8 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=218"></script>
+  <script src="game.js?v=20260716a"></script>
+  <script src="radar.js?v=20260716a"></script>
+  <script src="comms-fx.js?v=20260716a"></script>
 </body>
 </html>
