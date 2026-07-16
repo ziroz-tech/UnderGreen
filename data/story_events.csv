@@ -7,7 +7,7 @@ story_market_rebel_unlocked,market_rebel_unlocked,duel,,,,open=市場を見る|c
 story_lower_market_first_leaf,first_harvest,duel,,,,lower=下層に回す,TRUE,178,TRUE,,cropId=lettuce,comms_open,0.18,choice:lower->tab:market|choice:lower->guide:sell-lettuce
 story_first_place_floor_lock_v1,first_place,duel,LAYOUT ASSIST,,,ok=確認|return=返品を検討する,TRUE,94,TRUE,,,comms_open,0.18,choice:*->add_device:support_robot|choice:*->guide:seed-lettuce
 story_automation_os_unlocked,automation_os_unlocked,duel,AUTOMATION LINK,,,ok=確認,TRUE,174,TRUE,,unlockType=tab|unlockTarget=automation,comms_open,0.18,
-story_automation_evaluation,automation_evaluation,duel,MARKET PROFILE,,,ok=確認,TRUE,173,TRUE,,unlockId=automation_os_evaluation,comms_open,0.18,
+story_allmarket_unlocked,allmarket_unlocked,duel,MARKET PROFILE,,,ok=確認,TRUE,173,TRUE,,unlockId=automation_os_evaluation,comms_open,0.18,
 story_pre_result_robot_interview,pre_result_robot_interview,duel,EXIT INTERVIEW,,,close=記録を見る,TRUE,220,TRUE,,,comms_open,0.18,
 story_radar_unlocked,radar_unlocked,duel,PERIMETER LINK,,,ok=受信,TRUE,177,TRUE,,unlockType=radar|unlockTarget=radar,comms_open,0.18,choice:*->radar_demo:start
 story_radar_tutorial_success,radar_tutorial_success,duel,PERIMETER LINK,TRACE LOST,,ok=確認,TRUE,179,TRUE,,,comms_open,0.18,
