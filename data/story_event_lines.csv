@@ -134,3 +134,17 @@ story_pre_result_robot_interview,unknown,採用なら、いつから働けます
 story_pre_result_robot_interview,support_robot,充電休憩を一時間いただいた後、すぐに。
 story_pre_result_robot_interview,unknown,では最後に。前の雇い主を、どう評価しますか。
 story_pre_result_robot_interview,support_robot,それは、これから表示される記録をご覧ください。
+story_radar_unlocked,kai,売上が伸びすぎた。物流のノイズを官憲に拾われ始めている。
+story_radar_unlocked,operator,監視がこちらへ向いたということか。
+story_radar_unlocked,kai,古い周辺監視レーダーを回す。接近を捉えたら電源を落として痕跡を消せ。
+story_radar_unlocked,kai,買い物も出荷も警戒度を上げる。数字が高いほど巡回が寄ってくる。
+story_radar_unlocked,operator,了解。まず挙動を確認する。
+story_radar_unlocked,kai,今から一機こちらへ向けてデモを流す。重なる前に電源を切れ。
+story_radar_tutorial_success,operator,電源断。接触前にこちらの信号が消えた。
+story_radar_tutorial_success,kai,よし。接近個体は拠点を見失った。これが回避成功だ。
+story_radar_tutorial_success,kai,次から距離も速度も一定じゃない。警戒度が高いほど遭遇しやすくなる。
+story_radar_tutorial_success,operator,接近が去った。電源を戻せば通常運転に復帰する。
+story_radar_tutorial_failure,kai,接触された。だが今の走査は訓練回線だ。検知記録はこちらで破棄した。
+story_radar_tutorial_failure,operator,残高に変化はない。
+story_radar_tutorial_failure,kai,本番ではそうはいかない。アラートが強まったら、重なる前に電源を落とせ。
+story_radar_tutorial_failure,operator,了解。通常監視へ戻る。

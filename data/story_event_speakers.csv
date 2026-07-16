@@ -28,3 +28,10 @@ story_automation_evaluation,operator,right,0,オペレーター,未登録栽培�
 story_pre_result_robot_interview,support_robot,left,0,サポートロボット,前農場・支援担当,assets/characters/supportRobot-iso-leftdown.png
 story_pre_result_robot_interview,unknown,right,0,？？？,別農場・採用担当,
 story_pre_result_robot_interview,narrator,system,0,？？,,
+story_radar_unlocked,kai,left,0,カイ,下層市場,assets/characters/market-lower.png
+story_radar_unlocked,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
+story_radar_unlocked,narrator,system,0,？？,,
+story_radar_tutorial_success,kai,left,0,カイ,下層市場,assets/characters/market-lower.png
+story_radar_tutorial_success,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
+story_radar_tutorial_failure,kai,left,0,カイ,下層市場,assets/characters/market-lower.png
+story_radar_tutorial_failure,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png

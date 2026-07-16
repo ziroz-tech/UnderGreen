@@ -1,5 +1,6 @@
 id,type,target,requirements,event,hint,initiallyUnlocked
 shop_basic,tab,shop,unitsSold>=1,shop_unlocked_after_lettuce,作物を1株以上売ると調達端末が開きます,false
+radar_access,radar,radar,revenue>=250,radar_unlocked,累計売上250Cで周辺監視レーダーを受領,false
 seed_lettuce,seed_item,lettuce,,,最初から扱える基礎作物,true
 seed_spinach,seed_item,spinach,,,最初から扱える基礎作物,true
 seed_basil,seed_item,basil,shopUnlocked=true|unitsSold>=3,unlock_basil,累計3株を売ると香草種子の取引が開きます,false
@@ -21,9 +22,9 @@ shop_fridge,shop_item,fridge,unitPlaced:box>=1|revenue>=1600,unlock_storage,BOX�
 market_medical,market,medical,revenue>=1000,market_medical_unlocked,累計売上1000Cで接続,false
 broker_access,broker,broker,unit:pod>=4|unitPlaced:pod>=4,property_broker_unlocked,追加PODを3台購入して全4台を設置すると物件紹介が届きます,false
 automation_os_access,tab,automation,revenue>=1500,automation_os_unlocked,累計売上1500Cで自動化OS取引を解放,false
-automation_os_evaluation,story,automation_evaluation,automationTabUnlocked=true,automation_evaluation,自動化OS解放後にマーラから評価について通信,false
 market_upper,market,upper,revenue>=3000,market_upper_unlocked,累計売上3000Cで接続,false
 market_rebel,market,rebel,revenue>=3000,market_rebel_unlocked,累計売上3000Cで上層市場の次に接続,false
+automation_os_evaluation,story,automation_evaluation,allMarketsUnlocked=true,automation_evaluation,全市場解放後にマーラから評価について通信,false
 shop_support_robot,shop_item,support_robot,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に追加機を購入できます,false
 shop_procurement_terminal,shop_item,procurement_terminal,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に設置型調達端末を購入できます,false
 shop_shipping_hatch,shop_item,shipping_hatch,shopUnlocked=true|device:support_robot>=1,,サポートロボット合流後に出荷用搬出口を購入できます,false
