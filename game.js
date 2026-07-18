@@ -16,6 +16,7 @@ let PROPERTY_COMMENTS = {};
 let FLOOR_DEVICES = {};
 let ROBOT_SKILLS = {};
 let ROBOT_PERSONALITIES = {};
+let SUPPORT_ROBOT_BLACKOUT_LINES = [];
 let EVENTS = [];
 let QUIET_NEWS = [];
 let EQUIPMENT = {};
@@ -154,6 +155,7 @@ let selectedMarket = "lower";
 let selectedShopCategory = "seeds";
 let selectedInfoBookId = "gardening_intro";
 let selectedInfoEntryId = "";
+let selectedLaborRobotId = "";
 let saleQuantities = {};
 let pendingSaleSaveTimer = null;
 let pendingSaleRenderTimer = null;
@@ -178,8 +180,14 @@ let equipmentMenuTimer = null;
 let cleanToolDrag = null;
 const facilityPointers = new Map();
 let facilityView = { x: 0, y: 0, zoom: FACILITY_INITIAL_ZOOM };
+const laborBlueprintPointers = new Map();
+let laborBlueprintView = { x: 34, y: 34, zoom: 1 };
+let laborBlueprintDrag = null;
+let laborBlueprintWireDrag = null;
+let laborBlueprintPan = null;
+let laborBlueprintPinch = null;
 let suppressClickUntil = 0;
-let farmRenderRequested = false;
+const farmRenderRequestedBaseIds = new Set();
 let lastTickAt = Date.now();
 let lastRenderAt = 0;
 let lastAutosaveAt = 0;
@@ -203,7 +211,17 @@ let startTitleTapCount = 0;
 let startTitleTapAt = 0;
 let startLaunchPending = false;
 const COMMS_DEDUPE_TRIGGERS = new Set(["plant_resource_shortage", "resource_low"]);
-const GAME_TABS = ["farm", "market", "shop", "schedule", "broker", "radio", "info"];
+const GAME_TABS = ["farm", "market", "shop", "labor", "schedule", "broker", "radio", "info"];
+const GAME_TAB_SHORTCUTS = {
+  "1": "farm",
+  "2": "market",
+  "3": "shop",
+  "4": "labor",
+  "5": "schedule",
+  "6": "broker",
+  "7": "radio",
+  "8": "info"
+};
 let currentUiScale = 1;
 let lastLogToastMessage = "";
 let lastLogToastAt = 0;
@@ -545,12 +563,111 @@ const MARKET_EVENT_DEFAULT_RECOVERY_DAYS = 4;
 const MARKET_EVENT_OFFSET_EPSILON = 0.004;
 const MARKET_SUPPLY_EFFECT_EXPONENT = 0.68;
 const MARKET_SUPPLY_EFFECT_MAX_DELTA = 0.12;
+const SEED_MARKET_MIN_MULTIPLIER = 0.65;
+const SEED_MARKET_MAX_MULTIPLIER = 1.45;
+const SEED_MARKET_DAILY_SHOCK = 0.16;
+const SEED_MARKET_MEAN_REVERSION = 0.18;
 const SUPPORT_ROBOT_DEFAULT_RANGE = 2;
-const SUPPORT_ROBOT_MIN_ENERGY = 8;
 const SUPPORT_ROBOT_MAX_ENERGY = 100;
+const SUPPORT_ROBOT_MAX_MORALE = 100;
+const SUPPORT_MORALE_ENERGY_RATIO = 2;
+const SUPPORT_MORALE_MIN_EFFICIENCY = 0.35;
+const SUPPORT_CHARGE_BREAK_DAYS = 0.25;
+const SUPPORT_CHARGE_MORALE_RECOVERY = 5;
+const SUPPORT_FORCED_RECOVERY_DAYS = 1;
+const SUPPORT_RESOURCE_EPSILON = 0.001;
 const SUPPORT_TASK_BASE_COOLDOWN = { harvest: 0.055, plant: 0.06, cleaning: 0.06, procure: 0.08, ship: 0.08 };
 const SUPPORT_TASK_BASE_COST = { harvest: 5, plant: 4, cleaning: 6, procure: 4, ship: 4 };
 const SUPPORT_TASKS = Object.keys(SUPPORT_TASK_BASE_COOLDOWN);
+const SUPPORT_BLUEPRINT_ACTION_TYPES = ["harvest", "ship", "plant", "procure", "cleaning"];
+const SUPPORT_BLUEPRINT_TASK_TYPES = [...SUPPORT_BLUEPRINT_ACTION_TYPES, "rest"];
+const SUPPORT_BLUEPRINT_CONTROL_TYPES = ["branch", "sequence", "flipflop", "daily", "every", "random"];
+const SUPPORT_BLUEPRINT_NODE_TYPES = [...SUPPORT_BLUEPRINT_CONTROL_TYPES, "condition", ...SUPPORT_BLUEPRINT_TASK_TYPES];
+const SUPPORT_BLUEPRINT_STATUS = Object.freeze({
+  SUCCESS: "success",
+  FAILURE: "failure",
+  RUNNING: "running"
+});
+const SUPPORT_BLUEPRINT_PIN_SCHEMAS = Object.freeze({
+  event: {
+    inputs: [],
+    outputs: [{ id: "out", label: "開始", kind: "exec", maxLinks: 1 }]
+  },
+  sequence: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [
+      { id: "first", label: "①", kind: "exec", maxLinks: 1 },
+      { id: "second", label: "②", kind: "exec", maxLinks: 1 },
+      { id: "third", label: "③", kind: "exec", maxLinks: 1 }
+    ]
+  },
+  branch: {
+    inputs: [
+      { id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY },
+      { id: "condition", label: "BOOL", kind: "boolean", maxLinks: 1 }
+    ],
+    outputs: [
+      { id: "true", label: "はい", kind: "exec", maxLinks: 1 },
+      { id: "false", label: "いいえ", kind: "exec", maxLinks: 1 }
+    ]
+  },
+  flipflop: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [
+      { id: "a", label: "A", kind: "exec", maxLinks: 1 },
+      { id: "b", label: "B", kind: "exec", maxLinks: 1 }
+    ]
+  },
+  daily: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [
+      { id: "first", label: "本日初回", kind: "exec", maxLinks: 1 },
+      { id: "already", label: "実行済み", kind: "exec", maxLinks: 1 }
+    ]
+  },
+  every: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [
+      { id: "nth", label: "N回目", kind: "exec", maxLinks: 1 },
+      { id: "otherwise", label: "それ以外", kind: "exec", maxLinks: 1 }
+    ]
+  },
+  random: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [
+      { id: "hit", label: "当たり", kind: "exec", maxLinks: 1 },
+      { id: "miss", label: "外れ", kind: "exec", maxLinks: 1 }
+    ]
+  },
+  condition: {
+    inputs: [],
+    outputs: [{ id: "value", label: "BOOL", kind: "boolean", maxLinks: Number.POSITIVE_INFINITY }]
+  },
+  harvest: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [{ id: "failure", label: "次へ", kind: "exec", maxLinks: 1 }]
+  },
+  ship: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [{ id: "failure", label: "次へ", kind: "exec", maxLinks: 1 }]
+  },
+  plant: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [{ id: "failure", label: "次へ", kind: "exec", maxLinks: 1 }]
+  },
+  procure: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [{ id: "failure", label: "次へ", kind: "exec", maxLinks: 1 }]
+  },
+  cleaning: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [{ id: "failure", label: "次へ", kind: "exec", maxLinks: 1 }]
+  },
+  rest: {
+    inputs: [{ id: "in", label: "実行", kind: "exec", maxLinks: Number.POSITIVE_INFINITY }],
+    outputs: [{ id: "next", label: "次へ", kind: "exec", maxLinks: 1 }]
+  }
+});
 const SUPPORT_PLANT_SHORTAGE_NOTICE_DAYS = 1;
 const SUPPORT_GRADE_MULTIPLIER = { S: 1.35, A: 1.12, B: 1, C: 0.78 };
 
@@ -589,7 +706,7 @@ function parseCsv(text) {
   rows.push(row);
   const [headers, ...body] = rows.filter((entry) => entry.some((cell) => cell.trim() !== ""));
   if (!headers) return [];
-  return body.map((entry) => Object.fromEntries(headers.map((header, index) => [header.trim(), (entry[index] || "").trim()])));
+  return body.map((entry) => Object.fromEntries(headers.map((header, index) => [header.trim().replace(/^\uFEFF/, ""), (entry[index] || "").trim()])));
 }
 
 const REQUIRED_GAME_DATA_PATHS = [
@@ -608,6 +725,7 @@ const REQUIRED_GAME_DATA_PATHS = [
   "data/floor_devices.csv",
   "data/support_robot_skills.csv",
   "data/support_robot_personalities.csv",
+  "data/support_robot_blackout_lines.csv",
   "data/equipment.csv",
   "data/unlocks.csv",
   "data/area_profiles.csv",
@@ -623,6 +741,7 @@ const REQUIRED_GAME_DATA_PATHS = [
   "data/story_events.csv",
   "data/story_event_speakers.csv",
   "data/story_event_lines.csv",
+  "data/labor_tooltips.csv",
   "data/ui_text.csv",
 ];
 const csvTextCache = new Map();
@@ -1000,6 +1119,14 @@ async function loadExternalData() {
       description: row.description
     }));
   });
+  await loadRequiredCsv("data/support_robot_blackout_lines.csv", (rows) => {
+    SUPPORT_ROBOT_BLACKOUT_LINES = rows.map((row, index) => ({
+      id: row.id || `blackout-${index + 1}`,
+      text: row.text,
+      weight: Math.max(0, toNumber(row.weight, 1)),
+      enabled: String(row.enabled || "true").trim().toLowerCase() !== "false"
+    })).filter((row) => row.text && row.enabled && row.weight > 0);
+  });
   await loadRequiredCsv("data/equipment.csv", (rows) => {
     EQUIPMENT = rowsToObject(rows, (row) => ({
       name: row.name,
@@ -1164,6 +1291,12 @@ async function loadExternalData() {
       effects: toCommsEffects(row.effects)
     };
   }).filter((event) => event.id && event.trigger && event.pages.length).sort((a, b) => b.priority - a.priority);
+  await loadRequiredCsv("data/labor_tooltips.csv", (rows) => {
+    if (typeof window.configureLaborTooltips !== "function") {
+      throw new Error("Labor tooltip loader is unavailable");
+    }
+    window.configureLaborTooltips(rows);
+  });
   await loadRequiredCsv("data/ui_text.csv", applyUiText);
 }
 
@@ -1762,6 +1895,28 @@ function radarSnapshot() {
   };
 }
 
+function radarSupportRobotBlackoutData() {
+  if (!state) return { robots: [], lines: [] };
+  const robots = supportRobotRoster()
+    .filter(({ robot }) => robot.placed)
+    .map(({ base, robot }) => ({
+      id: robot.id,
+      name: supportRobotDisplayName(robot),
+      baseName: base.name || "UNKNOWN BASE",
+      recoveryMode: supportRobotRecoveryMode(robot),
+      energy: Math.round(Number(robot.supportEnergy) || 0),
+      morale: Math.round(Number(robot.supportMorale) || 0)
+    }));
+  return {
+    robots,
+    lines: SUPPORT_ROBOT_BLACKOUT_LINES.map((line) => ({
+      id: line.id,
+      text: line.text,
+      weight: line.weight
+    }))
+  };
+}
+
 function notifyRadarState() {
   window.dispatchEvent(new CustomEvent("undergreen:radar-state", { detail: radarSnapshot() }));
 }
@@ -1909,6 +2064,7 @@ function triggerPendingRadarUnlockConversation() {
 
 window.UndergreenRadar = {
   getSnapshot: radarSnapshot,
+  getSupportRobotBlackoutData: radarSupportRobotBlackoutData,
   setPower: setRadarPower,
   applyFine: applyRadarFine,
   consumeDemo: consumeRadarDemo,
@@ -1950,6 +2106,7 @@ function createInitialState(mode = "day45") {
     paused: false,
     timeUnlocked: false,
     marketFluctuation: {},
+    seedMarket: createDefaultSeedMarketState(0),
     marketSignals: {},
     marketEventOffsets: [],
     marketEventQueue: [],
@@ -2258,8 +2415,103 @@ function activeMarketSchedule() {
   );
 }
 
+function seedMarketBasePrice(cropId) {
+  const price = Number(CROPS[cropId]?.seedPrice);
+  return Math.max(1, Math.round(Number.isFinite(price) ? price : 1));
+}
+
+function seedMarketPriceBounds(cropId) {
+  const basePrice = seedMarketBasePrice(cropId);
+  return {
+    min: Math.max(1, Math.round(basePrice * SEED_MARKET_MIN_MULTIPLIER)),
+    max: Math.max(1, Math.round(basePrice * SEED_MARKET_MAX_MULTIPLIER))
+  };
+}
+
+function createDefaultSeedMarketState(lastUpdatedDay = 0) {
+  const prices = Object.fromEntries(Object.keys(CROPS).map((cropId) => [cropId, seedMarketBasePrice(cropId)]));
+  return {
+    lastUpdatedDay: Math.max(0, Math.floor(Number(lastUpdatedDay) || 0)),
+    prices,
+    previousPrices: { ...prices }
+  };
+}
+
+function ensureSeedMarketState() {
+  const fallbackDay = Math.max(0, Math.floor(Number(state.day) || 1) - 1);
+  const market = state.seedMarket && typeof state.seedMarket === "object"
+    ? state.seedMarket
+    : createDefaultSeedMarketState(fallbackDay);
+  market.prices = market.prices && typeof market.prices === "object" ? market.prices : {};
+  market.previousPrices = market.previousPrices && typeof market.previousPrices === "object"
+    ? market.previousPrices
+    : {};
+  const savedDay = Number(market.lastUpdatedDay);
+  market.lastUpdatedDay = Number.isFinite(savedDay) ? Math.max(0, Math.floor(savedDay)) : fallbackDay;
+  Object.keys(CROPS).forEach((cropId) => {
+    const bounds = seedMarketPriceBounds(cropId);
+    const price = Number(market.prices[cropId]);
+    const normalizedPrice = Number.isFinite(price)
+      ? clamp(Math.round(price), bounds.min, bounds.max)
+      : seedMarketBasePrice(cropId);
+    const previous = Number(market.previousPrices[cropId]);
+    market.prices[cropId] = normalizedPrice;
+    market.previousPrices[cropId] = Number.isFinite(previous)
+      ? clamp(Math.round(previous), bounds.min, bounds.max)
+      : normalizedPrice;
+  });
+  state.seedMarket = market;
+  return market;
+}
+
+function updateSeedMarketForDay(day = state.day) {
+  const market = ensureSeedMarketState();
+  const targetDay = Math.max(1, Math.floor(Number(day) || 1));
+  while (market.lastUpdatedDay < targetDay) {
+    Object.keys(CROPS).forEach((cropId) => {
+      const basePrice = seedMarketBasePrice(cropId);
+      const bounds = seedMarketPriceBounds(cropId);
+      const currentPrice = clamp(Math.round(Number(market.prices[cropId]) || basePrice), bounds.min, bounds.max);
+      const currentMultiplier = currentPrice / basePrice;
+      const reversion = (1 - currentMultiplier) * SEED_MARKET_MEAN_REVERSION;
+      const shock = randomBetween(-SEED_MARKET_DAILY_SHOCK, SEED_MARKET_DAILY_SHOCK);
+      const nextMultiplier = clamp(
+        currentMultiplier + reversion + shock,
+        SEED_MARKET_MIN_MULTIPLIER,
+        SEED_MARKET_MAX_MULTIPLIER
+      );
+      market.previousPrices[cropId] = currentPrice;
+      market.prices[cropId] = clamp(Math.round(basePrice * nextMultiplier), bounds.min, bounds.max);
+    });
+    market.lastUpdatedDay += 1;
+  }
+  return market;
+}
+
+function currentSeedPrice(cropId) {
+  const market = ensureSeedMarketState();
+  return Math.max(1, Math.round(Number(market.prices[cropId]) || seedMarketBasePrice(cropId)));
+}
+
+function seedPriceTrend(cropId) {
+  const market = ensureSeedMarketState();
+  const current = currentSeedPrice(cropId);
+  const previous = Math.max(1, Math.round(Number(market.previousPrices[cropId]) || current));
+  const delta = current - previous;
+  const percent = Math.round(Math.abs(delta) / previous * 100);
+  return {
+    current,
+    previous,
+    delta,
+    percent,
+    direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
+    label: delta > 0 ? "▲ " + percent + "%" : delta < 0 ? "▼ " + percent + "%" : "± 0%"
+  };
+}
+
 function updateMarketForDay(options = {}) {
   ensureMarketNewsState();
+  updateSeedMarketForDay(state.day);
   Object.keys(CROPS).forEach((cropId) => {
     state.marketFluctuation[cropId] = randomBetween(0.94, 1.06);
   });
@@ -2709,6 +2961,11 @@ function loadGame() {
   if (state.pendingDay30Result) state.paused = true;
   ensureAnalytics();
   state.marketFluctuation ||= {};
+  if (!state.seedMarket || typeof state.seedMarket !== "object") {
+    state.seedMarket = createDefaultSeedMarketState(Math.max(0, Math.floor(Number(state.day) || 1) - 1));
+  }
+  ensureSeedMarketState();
+  updateSeedMarketForDay(state.day);
   state.marketSignals ||= {};
   state.marketEventOffsets = Array.isArray(state.marketEventOffsets) ? state.marketEventOffsets : [];
   ensureMarketSignalsState();
@@ -2726,6 +2983,7 @@ function loadGame() {
   ensureOpenedTabs();
   ensureUiGuideState();
   ownedBases();
+  supportRobotRoster();
   ensureProcurementTags();
   state.marketTabUnlocked = Boolean(state.marketTabUnlocked || state.tradeStats?.unitsSold > 0);
   state.automationTabUnlocked = Boolean(state.automationTabUnlocked || state.unlocks.automation_os_access);
@@ -2793,8 +3051,61 @@ function ownedBases() {
   return state.bases;
 }
 
+function supportRobotRoster() {
+  const records = [];
+  ownedBases().forEach((base) => {
+    base.floorDevices.forEach((robot) => {
+      if (robot.type !== "support_robot") return;
+      ensureSupportRobotProfile(robot);
+      records.push({ base, robot });
+    });
+  });
+  const initialRecord = records.find((record) => record.robot.isInitialSupportRobot) || records[0] || null;
+  records.forEach((record, index) => {
+    record.robot.isInitialSupportRobot = record === initialRecord;
+    if (record.robot.isInitialSupportRobot) record.robot.robotName = "サポートロボット";
+    else if (!record.robot.robotName) record.robot.robotName = `SR-${String(index + 1).padStart(2, "0")}`;
+  });
+  return records;
+}
+
+function supportRobotDisplayName(robot) {
+  ensureSupportRobotProfile(robot);
+  return robot.robotName || "サポートロボット";
+}
+
+function supportRobotLocationLabel(base, robot) {
+  const baseName = base?.name || "UNKNOWN BASE";
+  if (!robot?.placed) return `${baseName} / STOCK`;
+  return `${baseName} / X${Number(robot.x) + 1}-Y${Number(robot.y) + 1}`;
+}
+
 function currentBase() {
   return ownedBases().find((base) => base.id === state.activeBaseId) || ownedBases()[0];
+}
+
+function farmRenderBaseId(baseOrId = null) {
+  if (typeof baseOrId === "string") return baseOrId;
+  return baseOrId?.id || state?.activeBaseId || "";
+}
+
+function requestFarmRender(baseOrId = null) {
+  const baseId = farmRenderBaseId(baseOrId);
+  if (baseId) farmRenderRequestedBaseIds.add(baseId);
+}
+
+function farmRenderIsRequested(baseOrId = null) {
+  const baseId = farmRenderBaseId(baseOrId);
+  return Boolean(baseId && farmRenderRequestedBaseIds.has(baseId));
+}
+
+function clearFarmRenderRequest(baseOrId = null) {
+  const baseId = farmRenderBaseId(baseOrId);
+  if (baseId) farmRenderRequestedBaseIds.delete(baseId);
+}
+
+function farmScreenIsActive() {
+  return document.getElementById("farm-screen")?.classList.contains("active") || false;
 }
 
 function currentShelves() {
@@ -2906,11 +3217,266 @@ function randomRecordId(record, fallback = "") {
   return ids[Math.floor(Math.random() * ids.length)] || fallback;
 }
 
+function supportBlueprintPinSchema(type) {
+  return SUPPORT_BLUEPRINT_PIN_SCHEMAS[type] || SUPPORT_BLUEPRINT_PIN_SCHEMAS.event;
+}
+
+function supportBlueprintPinDefinition(type, direction, pinId) {
+  const collection = direction === "input"
+    ? supportBlueprintPinSchema(type).inputs
+    : supportBlueprintPinSchema(type).outputs;
+  return collection.find((pin) => pin.id === pinId) || null;
+}
+
+function supportBlueprintDefaultPin(type, direction, kind = "exec") {
+  const collection = direction === "input"
+    ? supportBlueprintPinSchema(type).inputs
+    : supportBlueprintPinSchema(type).outputs;
+  return collection.find((pin) => pin.kind === kind)?.id || "";
+}
+
+function createDefaultSupportBlueprint() {
+  const rootId = makeId("bp-root");
+  return {
+    version: 3,
+    rootId,
+    nodes: [{ id: rootId, type: "event", x: 54, y: 182 }],
+    links: []
+  };
+}
+
+function migrateLegacySupportBlueprint(source) {
+  const fallback = createDefaultSupportBlueprint();
+  const rawNodes = Array.isArray(source?.nodes) ? source.nodes : [];
+  const sourceRoot = rawNodes.find((node) => node?.type === "event")
+    || rawNodes.find((node) => node?.id === source?.rootId);
+  const root = {
+    id: typeof sourceRoot?.id === "string" && sourceRoot.id ? sourceRoot.id : fallback.rootId,
+    type: "event",
+    x: Number.isFinite(Number(sourceRoot?.x)) ? Number(sourceRoot.x) : 54,
+    y: Number.isFinite(Number(sourceRoot?.y)) ? Number(sourceRoot.y) : 182
+  };
+  const actionNodes = rawNodes
+    .filter((node) => SUPPORT_BLUEPRINT_ACTION_TYPES.includes(node?.type))
+    .map((node, index) => ({
+      ...node,
+      id: typeof node.id === "string" && node.id ? node.id : makeId("bp-node"),
+      x: Number.isFinite(Number(node.x)) ? Number(node.x) : root.x + 520,
+      y: Number.isFinite(Number(node.y)) ? Number(node.y) : 90 + index * 150
+    }));
+  if (!actionNodes.length) return { ...fallback, rootId: root.id, nodes: [root] };
+
+  const priorityId = makeId("bp-priority");
+  const oldNext = new Map((Array.isArray(source?.links) ? source.links : []).map((link) => [link?.from, link?.to]));
+  const actionById = new Map(actionNodes.map((node) => [node.id, node]));
+  const ordered = [];
+  const visited = new Set();
+  let currentId = oldNext.get(root.id);
+  while (currentId && actionById.has(currentId) && !visited.has(currentId)) {
+    visited.add(currentId);
+    ordered.push(actionById.get(currentId));
+    currentId = oldNext.get(currentId);
+  }
+  actionNodes.forEach((node) => {
+    if (!visited.has(node.id)) ordered.push(node);
+  });
+
+  const priority = { id: priorityId, type: "priority", x: root.x + 270, y: root.y - 36 };
+  const links = [
+    { id: makeId("bp-link"), from: root.id, fromPin: "out", to: priorityId, toPin: "in", order: 0 },
+    ...ordered.map((node, index) => ({
+      id: makeId("bp-link"),
+      from: priorityId,
+      fromPin: "child",
+      to: node.id,
+      toPin: "in",
+      order: index
+    }))
+  ];
+  return { version: 2, rootId: root.id, nodes: [root, priority, ...ordered], links };
+}
+
+function migrateSupportBlueprintV2(source) {
+  const rawNodes = Array.isArray(source?.nodes) ? source.nodes : [];
+  const rawLinks = Array.isArray(source?.links) ? [...source.links] : [];
+  const typeMap = {
+    priority: "sequence",
+    repeat_until_failure: "sequence",
+    repeat_while: "branch"
+  };
+  const originalNodeById = new Map(rawNodes.map((node) => [node?.id, node]));
+  const nodes = rawNodes.map((node) => ({
+    ...node,
+    type: typeMap[node?.type] || node?.type
+  }));
+  const orderedChildLinks = new Map();
+  rawLinks
+    .filter((link) => ["priority", "sequence"].includes(originalNodeById.get(link?.from)?.type) && link?.fromPin === "child")
+    .sort((left, right) => (Number(left.order) || 0) - (Number(right.order) || 0))
+    .forEach((link) => {
+      const links = orderedChildLinks.get(link.from) || [];
+      links.push(link);
+      orderedChildLinks.set(link.from, links);
+    });
+
+  const sequencePins = ["first", "second", "third"];
+  const links = rawLinks.map((link) => {
+    const fromType = originalNodeById.get(link?.from)?.type;
+    const next = { ...link };
+    if (["priority", "sequence"].includes(fromType) && link.fromPin === "child") {
+      const index = (orderedChildLinks.get(link.from) || []).indexOf(link);
+      next.fromPin = sequencePins[index] || "";
+    } else if (fromType === "repeat_until_failure" && link.fromPin === "body") {
+      next.fromPin = "first";
+    } else if (fromType === "repeat_while" && link.fromPin === "body") {
+      next.fromPin = "true";
+    }
+    return next;
+  }).filter((link) => link.fromPin);
+
+  return {
+    version: 3,
+    rootId: source?.rootId,
+    nodes,
+    links
+  };
+}
+function normalizeSupportBlueprintNode(rawNode, index) {
+  const node = {
+    id: typeof rawNode?.id === "string" && rawNode.id ? rawNode.id : makeId("bp-node"),
+    type: rawNode?.type,
+    x: Number.isFinite(Number(rawNode?.x)) ? Number(rawNode.x) : 300 + index * 36,
+    y: Number.isFinite(Number(rawNode?.y)) ? Number(rawNode.y) : 130 + index * 26
+  };
+  if (node.type === "plant") node.cropId = CROPS[rawNode.cropId] ? rawNode.cropId : "lettuce";
+  if (node.type === "procure") {
+    node.cropId = CROPS[rawNode.cropId] ? rawNode.cropId : "lettuce";
+    node.packs = clamp(Math.floor(Number(rawNode.packs) || 1), 1, 12);
+  }
+  if (node.type === "ship") {
+    node.cropId = CROPS[rawNode.cropId] ? rawNode.cropId : "lettuce";
+    node.marketId = MARKETS[rawNode.marketId] ? rawNode.marketId : "lower";
+  }
+  if (node.type === "every") {
+    node.everyN = [2, 3, 5].includes(Number(rawNode.everyN)) ? Number(rawNode.everyN) : 3;
+  }
+  if (node.type === "random") {
+    node.probability = [25, 50, 75].includes(Number(rawNode.probability)) ? Number(rawNode.probability) : 50;
+  }
+  if (node.type === "condition") {
+    const sources = ["action_available", "inventory", "seed", "seed_price", "money", "water", "nutrient", "energy", "morale"];
+    const operators = ["gte", "gt", "lte", "lt", "eq"];
+    node.conditionSource = sources.includes(rawNode.conditionSource) ? rawNode.conditionSource : "action_available";
+    node.operator = operators.includes(rawNode.operator) ? rawNode.operator : "gte";
+    node.value = Math.max(0, Math.min(999999, Number.isFinite(Number(rawNode.value)) ? Number(rawNode.value) : 1));
+    node.cropId = rawNode.cropId === "*" || CROPS[rawNode.cropId] ? rawNode.cropId : "lettuce";
+    node.actionType = SUPPORT_BLUEPRINT_ACTION_TYPES.includes(rawNode.actionType) ? rawNode.actionType : "plant";
+    node.marketId = MARKETS[rawNode.marketId] ? rawNode.marketId : "lower";
+    node.packs = clamp(Math.floor(Number(rawNode.packs) || 1), 1, 12);
+  }
+  return node;
+}
+
+function normalizeSupportBlueprint(source) {
+  const fallback = createDefaultSupportBlueprint();
+  if (!source || typeof source !== "object") return fallback;
+  const hasLegacyLinks = (Number(source.version) || 1) < 2
+    || (Array.isArray(source.links) && source.links.some((link) => !link?.fromPin || !link?.toPin));
+  if (hasLegacyLinks) return normalizeSupportBlueprint(migrateLegacySupportBlueprint(source));
+  if ((Number(source.version) || 2) < 3) {
+    return normalizeSupportBlueprint(migrateSupportBlueprintV2(source));
+  }
+
+  const rawNodes = Array.isArray(source.nodes) ? source.nodes : [];
+  const sourceRoot = rawNodes.find((node) => node?.type === "event")
+    || rawNodes.find((node) => node?.id === source.rootId);
+  const rootId = typeof sourceRoot?.id === "string" && sourceRoot.id ? sourceRoot.id : fallback.rootId;
+  const nodes = [{
+    id: rootId,
+    type: "event",
+    x: Number.isFinite(Number(sourceRoot?.x)) ? Number(sourceRoot.x) : 54,
+    y: Number.isFinite(Number(sourceRoot?.y)) ? Number(sourceRoot.y) : 182
+  }];
+  const usedIds = new Set([rootId]);
+  rawNodes.forEach((rawNode, index) => {
+    if (!SUPPORT_BLUEPRINT_NODE_TYPES.includes(rawNode?.type)) return;
+    const node = normalizeSupportBlueprintNode(rawNode, index);
+    if (usedIds.has(node.id)) node.id = makeId("bp-node");
+    usedIds.add(node.id);
+    nodes.push(node);
+  });
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const incomingCounts = new Map();
+  const outgoingCounts = new Map();
+  const adjacency = new Map();
+  const links = [];
+  const createsCycle = (from, to) => {
+    const pending = [to];
+    const visited = new Set();
+    while (pending.length) {
+      const current = pending.pop();
+      if (current === from) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      (adjacency.get(current) || []).forEach((next) => pending.push(next));
+    }
+    return false;
+  };
+
+  (Array.isArray(source.links) ? source.links : []).forEach((rawLink, index) => {
+    const fromNode = nodeById.get(rawLink?.from);
+    const toNode = nodeById.get(rawLink?.to);
+    if (!fromNode || !toNode || fromNode.id === toNode.id) return;
+    const fromPin = rawLink.fromPin || supportBlueprintDefaultPin(fromNode.type, "output");
+    const toPin = rawLink.toPin || supportBlueprintDefaultPin(toNode.type, "input");
+    const output = supportBlueprintPinDefinition(fromNode.type, "output", fromPin);
+    const input = supportBlueprintPinDefinition(toNode.type, "input", toPin);
+    if (!output || !input || output.kind !== input.kind) return;
+
+    const incomingKey = `${toNode.id}:${toPin}`;
+    const outgoingKey = `${fromNode.id}:${fromPin}`;
+    const incomingCount = incomingCounts.get(incomingKey) || 0;
+    const outgoingCount = outgoingCounts.get(outgoingKey) || 0;
+    if (incomingCount >= input.maxLinks || outgoingCount >= output.maxLinks) return;
+    if (links.some((link) => link.from === fromNode.id && link.fromPin === fromPin && link.to === toNode.id && link.toPin === toPin)) return;
+    if (createsCycle(fromNode.id, toNode.id)) return;
+
+    incomingCounts.set(incomingKey, incomingCount + 1);
+    outgoingCounts.set(outgoingKey, outgoingCount + 1);
+    adjacency.set(fromNode.id, [...(adjacency.get(fromNode.id) || []), toNode.id]);
+    links.push({
+      id: typeof rawLink.id === "string" && rawLink.id ? rawLink.id : makeId("bp-link"),
+      from: fromNode.id,
+      fromPin,
+      to: toNode.id,
+      toPin,
+      order: Number.isFinite(Number(rawLink.order)) ? Number(rawLink.order) : index
+    });
+  });
+  return { version: 3, rootId, nodes, links };
+}
 function ensureSupportRobotProfile(device) {
   if (!device || device.type !== "support_robot") return device;
   if (!ROBOT_SKILLS[device.robotSkillId]) device.robotSkillId = randomRecordId(ROBOT_SKILLS, "balanced");
   if (!ROBOT_PERSONALITIES[device.robotPersonalityId]) device.robotPersonalityId = randomRecordId(ROBOT_PERSONALITIES, "steady");
-  if (!Number.isFinite(Number(device.supportEnergy))) device.supportEnergy = SUPPORT_ROBOT_MAX_ENERGY;
+  device.robotName = typeof device.robotName === "string" ? device.robotName.trim().slice(0, 24) : "";
+  device.isInitialSupportRobot = Boolean(device.isInitialSupportRobot);
+  const maxEnergy = SUPPORT_ROBOT_MAX_ENERGY;
+  const maxMorale = SUPPORT_ROBOT_MAX_MORALE;
+  device.supportEnergy = Number.isFinite(Number(device.supportEnergy))
+    ? Math.max(0, Math.min(maxEnergy, Number(device.supportEnergy)))
+    : maxEnergy;
+  device.supportMorale = Number.isFinite(Number(device.supportMorale))
+    ? Math.max(0, Math.min(maxMorale, Number(device.supportMorale)))
+    : maxMorale;
+  device.supportChargeRemaining = Number.isFinite(Number(device.supportChargeRemaining))
+    ? Math.max(0, Number(device.supportChargeRemaining))
+    : 0;
+  device.supportChargeNodeId = typeof device.supportChargeNodeId === "string" ? device.supportChargeNodeId : "";
+  device.supportRecoveryMode = device.supportChargeRemaining > 0
+    ? (device.supportRecoveryMode === "forced" ? "forced" : "charge")
+    : "";
   const legacyCooldown = Number.isFinite(Number(device.supportCooldown)) ? Number(device.supportCooldown) : 0;
   const previousCooldowns = device.supportTaskCooldowns || {};
   device.supportTaskCooldowns = {};
@@ -2918,11 +3484,9 @@ function ensureSupportRobotProfile(device) {
     const value = Number(previousCooldowns[task]);
     device.supportTaskCooldowns[task] = Number.isFinite(value) ? Math.max(0, value) : Math.max(0, legacyCooldown);
   });
-  device.supportCooldown = Math.max(0, ...Object.values(device.supportTaskCooldowns));
+  device.supportCooldown = Math.max(device.supportChargeRemaining, 0, ...Object.values(device.supportTaskCooldowns));
   const harvestSource = device.harvestAutomation || device.automation?.harvest || {};
-  device.harvestAutomation = {
-    enabled: harvestSource.enabled !== false
-  };
+  device.harvestAutomation = { enabled: harvestSource.enabled !== false };
   const plantingSource = device.plantingAutomation || device.automation?.planting || {};
   const shortageNoticeAtDay = plantingSource.shortageNoticeAtDay === null
     || plantingSource.shortageNoticeAtDay === undefined
@@ -2934,9 +3498,36 @@ function ensureSupportRobotProfile(device) {
     shortageNoticeKey: typeof plantingSource.shortageNoticeKey === "string" ? plantingSource.shortageNoticeKey : "",
     shortageNoticeAtDay: Number.isFinite(shortageNoticeAtDay) ? shortageNoticeAtDay : null
   };
+  device.supportBlueprint = normalizeSupportBlueprint(device.supportBlueprint);
+  const nodeIds = new Set(device.supportBlueprint.nodes.map((node) => node.id));
+  const previousRuntime = device.supportBlueprintRuntime;
+  const memory = previousRuntime?.version === 3 && previousRuntime.memory && typeof previousRuntime.memory === "object"
+    ? Object.fromEntries(Object.entries(previousRuntime.memory).filter(([nodeId]) => nodeIds.has(nodeId)))
+    : {};
+  device.supportBlueprintRuntime = {
+    version: 3,
+    memory,
+    nodeBadges: {},
+    activeNodeId: nodeIds.has(previousRuntime?.activeNodeId) ? previousRuntime.activeNodeId : "",
+    lastNodeId: nodeIds.has(previousRuntime?.lastNodeId) ? previousRuntime.lastNodeId : "",
+    lastStatus: Object.values(SUPPORT_BLUEPRINT_STATUS).includes(previousRuntime?.lastStatus)
+      ? previousRuntime.lastStatus
+      : SUPPORT_BLUEPRINT_STATUS.FAILURE
+  };
   return device;
 }
 
+function resetSupportBlueprintRuntime(robot) {
+  if (!robot) return;
+  robot.supportBlueprintRuntime = {
+    version: 3,
+    memory: {},
+    nodeBadges: {},
+    activeNodeId: "",
+    lastNodeId: "",
+    lastStatus: SUPPORT_BLUEPRINT_STATUS.FAILURE
+  };
+}
 function createFloorDevice(type) {
   const device = { id: makeId("device"), type, placed: false, x: null, y: null, tags: unitTags(type), dirt: 0 };
   ensureSupportRobotProfile(device);
@@ -3027,7 +3618,9 @@ function supportRobotRange(device) {
 
 function supportRobotCooldownDays(device, task) {
   const personality = supportRobotPersonality(device);
-  const speed = (Number(personality.speedMod) || 1) * supportTaskMultiplier(device, task);
+  const speed = (Number(personality.speedMod) || 1)
+    * supportTaskMultiplier(device, task)
+    * supportRobotMoraleEfficiency(device);
   return (SUPPORT_TASK_BASE_COOLDOWN[task] || 0.08) / Math.max(0.25, speed);
 }
 
@@ -3037,6 +3630,113 @@ function supportRobotEnergyCost(device, task) {
   return Math.max(1, (SUPPORT_TASK_BASE_COST[task] || 4) * (Number(personality.fuelMod) || 1) / Math.max(0.45, grade));
 }
 
+function supportRobotMaxEnergy(device) {
+  ensureSupportRobotProfile(device);
+  return SUPPORT_ROBOT_MAX_ENERGY;
+}
+
+function supportRobotMaxMorale(device) {
+  ensureSupportRobotProfile(device);
+  return SUPPORT_ROBOT_MAX_MORALE;
+}
+
+function supportRobotMoraleEnergyRatio(device) {
+  ensureSupportRobotProfile(device);
+  return SUPPORT_MORALE_ENERGY_RATIO;
+}
+
+function supportRobotMoraleEfficiency(robot) {
+  const maxMorale = SUPPORT_ROBOT_MAX_MORALE;
+  const morale = Math.max(0, Math.min(maxMorale, Number(robot?.supportMorale) || 0));
+  const ratio = maxMorale > 0 ? morale / maxMorale : 0;
+  return SUPPORT_MORALE_MIN_EFFICIENCY + (1 - SUPPORT_MORALE_MIN_EFFICIENCY) * ratio;
+}
+
+function supportRobotActionCostPlan(robot, task) {
+  ensureSupportRobotProfile(robot);
+  const required = Math.max(0, supportRobotEnergyCost(robot, task));
+  const energyAvailable = Math.max(0, Number(robot.supportEnergy) || 0);
+  const energySpent = Math.min(energyAvailable, required);
+  const uncoveredCost = Math.max(0, required - energySpent);
+  const ratio = Math.max(0.1, supportRobotMoraleEnergyRatio(robot));
+  const moraleAvailable = Math.max(0, Number(robot.supportMorale) || 0);
+  const moraleRequired = uncoveredCost / ratio;
+  const moraleSpent = Math.min(moraleAvailable, moraleRequired);
+  const hasUsableRemainder = energyAvailable > SUPPORT_RESOURCE_EPSILON
+    || moraleAvailable > SUPPORT_RESOURCE_EPSILON;
+  return {
+    required,
+    energySpent,
+    moraleSpent,
+    affordable: required <= SUPPORT_RESOURCE_EPSILON || hasUsableRemainder
+  };
+}
+
+function supportRobotChargeBreakDays() {
+  return SUPPORT_CHARGE_BREAK_DAYS;
+}
+
+function supportRobotChargeMoraleRecovery() {
+  return SUPPORT_CHARGE_MORALE_RECOVERY;
+}
+
+function supportRobotForcedRecoveryDays() {
+  return SUPPORT_FORCED_RECOVERY_DAYS;
+}
+
+function supportRobotChargeRemainingDays(robot) {
+  return Math.max(0, Number(robot?.supportChargeRemaining) || 0);
+}
+
+function supportRobotIsCharging(robot) {
+  return supportRobotChargeRemainingDays(robot) > 0;
+}
+
+function supportRobotRecoveryMode(robot) {
+  if (!supportRobotIsCharging(robot)) return "";
+  return robot?.supportRecoveryMode === "forced" ? "forced" : "charge";
+}
+
+function supportRobotIsForcedRecovery(robot) {
+  return supportRobotRecoveryMode(robot) === "forced";
+}
+
+function supportRobotResourcesDepleted(robot) {
+  ensureSupportRobotProfile(robot);
+  return (Number(robot.supportEnergy) || 0) <= SUPPORT_RESOURCE_EPSILON
+    && (Number(robot.supportMorale) || 0) <= SUPPORT_RESOURCE_EPSILON;
+}
+
+function startSupportRobotRecovery(robot, days, mode, nodeId = "") {
+  if (supportRobotIsCharging(robot)) return false;
+  robot.supportChargeRemaining = Math.max(SUPPORT_RESOURCE_EPSILON, Number(days) || 0);
+  robot.supportChargeNodeId = String(nodeId || "");
+  robot.supportRecoveryMode = mode === "forced" ? "forced" : "charge";
+  SUPPORT_TASKS.forEach((task) => {
+    robot.supportTaskCooldowns[task] = Math.max(
+      Number(robot.supportTaskCooldowns[task]) || 0,
+      robot.supportChargeRemaining
+    );
+  });
+  refreshSupportRobotCooldown(robot);
+  return true;
+}
+
+function startSupportRobotChargeBreak(robot, nodeId = "") {
+  ensureSupportRobotProfile(robot);
+  if (supportRobotIsCharging(robot) || (Number(robot.supportEnergy) || 0) >= supportRobotMaxEnergy(robot) - 0.0001) {
+    return false;
+  }
+  return startSupportRobotRecovery(robot, supportRobotChargeBreakDays(), "charge", nodeId);
+}
+
+function startSupportRobotForcedRecovery(robot) {
+  ensureSupportRobotProfile(robot);
+  if (!supportRobotResourcesDepleted(robot) || supportRobotIsCharging(robot)) return false;
+  robot.supportEnergy = 0;
+  robot.supportMorale = 0;
+  return startSupportRobotRecovery(robot, supportRobotForcedRecoveryDays(), "forced");
+}
 function itemGridCenter(item, kind) {
   const size = footprint({ ...item, kind });
   return { x: item.x + (size.width - 1) / 2, y: item.y + (size.height - 1) / 2 };
@@ -3050,43 +3750,90 @@ function isWithinGridRange(aX, aY, bX, bY, radius) {
   return gridRangeDistance(aX, aY, bX, bY) <= Number(radius || 0);
 }
 
+function gridRangeDistanceToFootprint(originX, originY, item, kind) {
+  const size = footprint({ ...item, kind });
+  const pointX = Number(originX);
+  const pointY = Number(originY);
+  const minX = Number(item?.x);
+  const minY = Number(item?.y);
+  if (![pointX, pointY, minX, minY].every(Number.isFinite)) return Infinity;
+
+  const maxX = minX + Math.max(1, Number(size.width) || 1) - 1;
+  const maxY = minY + Math.max(1, Number(size.height) || 1) - 1;
+  const deltaX = pointX < minX ? minX - pointX : pointX > maxX ? pointX - maxX : 0;
+  const deltaY = pointY < minY ? minY - pointY : pointY > maxY ? pointY - maxY : 0;
+  return deltaX + deltaY;
+}
+
 function supportRobotCanReach(robot, item, kind) {
   if (!robot?.placed || !item?.placed) return false;
-  const center = itemGridCenter(item, kind);
-  return isWithinGridRange(center.x, center.y, robot.x, robot.y, supportRobotRange(robot));
+  // Multi-cell equipment is reachable when any occupied grid cell is in range.
+  return gridRangeDistanceToFootprint(robot.x, robot.y, item, kind) <= supportRobotRange(robot);
 }
 
 function refreshSupportRobotCooldown(robot) {
   ensureSupportRobotProfile(robot);
-  robot.supportCooldown = Math.max(0, ...Object.values(robot.supportTaskCooldowns || {}));
+  robot.supportCooldown = Math.max(
+    supportRobotChargeRemainingDays(robot),
+    0,
+    ...Object.values(robot.supportTaskCooldowns || {})
+  );
 }
 
 function tickSupportRobotCooldowns(robot, deltaDays) {
   ensureSupportRobotProfile(robot);
+  const chargeNodeId = robot.supportChargeNodeId;
+  const wasCharging = supportRobotIsCharging(robot);
+  const recoveryMode = supportRobotRecoveryMode(robot);
   SUPPORT_TASKS.forEach((task) => {
     robot.supportTaskCooldowns[task] = Math.max(0, (Number(robot.supportTaskCooldowns[task]) || 0) - deltaDays);
   });
+  if (wasCharging) {
+    robot.supportChargeRemaining = Math.max(0, supportRobotChargeRemainingDays(robot) - deltaDays);
+    if (!supportRobotIsCharging(robot)) {
+      robot.supportEnergy = supportRobotMaxEnergy(robot);
+      robot.supportMorale = recoveryMode === "forced"
+        ? supportRobotMaxMorale(robot)
+        : Math.min(
+          supportRobotMaxMorale(robot),
+          (Number(robot.supportMorale) || 0) + supportRobotChargeMoraleRecovery()
+        );
+      robot.supportChargeNodeId = "";
+      robot.supportRecoveryMode = "";
+    }
+  }
   refreshSupportRobotCooldown(robot);
+  return {
+    chargeCompleted: wasCharging && !supportRobotIsCharging(robot),
+    chargeNodeId,
+    recoveryMode
+  };
+}
+function supportRobotCooldownReady(robot, task) {
+  ensureSupportRobotProfile(robot);
+  return !supportRobotIsCharging(robot)
+    && (Number(robot.supportCooldown) || 0) <= 0
+    && (Number(robot.supportTaskCooldowns?.[task]) || 0) <= 0;
 }
 
 function supportRobotTaskReady(robot, task) {
-  ensureSupportRobotProfile(robot);
-  return (Number(robot.supportCooldown) || 0) <= 0
-    && (Number(robot.supportTaskCooldowns?.[task]) || 0) <= 0
-    && (Number(robot.supportEnergy) || 0) >= SUPPORT_ROBOT_MIN_ENERGY
-    && (Number(robot.supportEnergy) || 0) >= supportRobotEnergyCost(robot, task);
+  return supportRobotCooldownReady(robot, task) && supportRobotActionCostPlan(robot, task).affordable;
 }
-
 function spendSupportRobotAction(robot, task) {
   ensureSupportRobotProfile(robot);
-  robot.supportEnergy = Math.max(0, (Number(robot.supportEnergy) || 0) - supportRobotEnergyCost(robot, task));
+  const costPlan = supportRobotActionCostPlan(robot, task);
+  if (!costPlan.affordable) return false;
+  const remainingEnergy = Math.max(0, (Number(robot.supportEnergy) || 0) - costPlan.energySpent);
+  const remainingMorale = Math.max(0, (Number(robot.supportMorale) || 0) - costPlan.moraleSpent);
+  robot.supportEnergy = remainingEnergy <= SUPPORT_RESOURCE_EPSILON ? 0 : remainingEnergy;
+  robot.supportMorale = remainingMorale <= SUPPORT_RESOURCE_EPSILON ? 0 : remainingMorale;
   const cooldown = supportRobotCooldownDays(robot, task);
   SUPPORT_TASKS.forEach((entryTask) => {
     robot.supportTaskCooldowns[entryTask] = cooldown;
   });
   refreshSupportRobotCooldown(robot);
+  return true;
 }
-
 function supportRobotExists() {
   return ownedBases().some((base) => base.floorDevices?.some((device) => device.type === "support_robot"));
 }
@@ -3133,7 +3880,12 @@ function grantFloorDevice(type) {
     state.supportRobotGranted = true;
   }
   const device = createFloorDevice(type);
+  if (type === "support_robot") {
+    device.isInitialSupportRobot = true;
+    device.robotName = "サポートロボット";
+  }
   currentFloorDevices().push(device);
+  if (type === "support_robot") supportRobotRoster();
   const item = { ...device, kind: "device" };
   const position = preferredSupportRobotPosition(currentBase(), item);
   if (position) Object.assign(device, position, { placed: true });
@@ -4375,6 +5127,7 @@ function isTabAvailable(tabId) {
   if (tabId === "shop") return Boolean(state.shopUnlocked);
   if (tabId === "schedule") return Boolean(state.shopUnlocked);
   if (tabId === "broker") return Boolean(state.brokerUnlocked);
+  if (tabId === "labor") return Boolean(state.debugMode) || supportRobotExists();
   return true;
 }
 
@@ -4402,6 +5155,11 @@ function updateTabIndicators() {
 
 function switchTab(tabId) {
   const previousTab = document.querySelector(".screen.active")?.id?.replace("-screen", "");
+  if (!isTabAvailable(tabId)) {
+    toast("この機能を利用できるサポートロボットがありません。", "warning");
+    rejectFeedback();
+    return;
+  }
   if (tabId === "market" && !state.marketTabUnlocked) {
     toast("Action unavailable right now.", "warning");
     rejectFeedback();
@@ -4436,7 +5194,9 @@ function switchTab(tabId) {
     triggerComms("schedule_opened");
   }
   if (tabId === "radio") renderRadio();
+  if (tabId === "labor") renderLabor();
   if (tabId === "info") renderInfo();
+  if (tabId === "farm" && (previousTab !== tabId || farmRenderIsRequested())) renderFarm();
   if (previousTab !== tabId) {
     playSound("tab_switch", 0.18);
     hapticFeedback(8);
@@ -4447,6 +5207,18 @@ function switchTab(tabId) {
 
 function activeTabId() {
   return document.querySelector(".screen.active")?.id?.replace("-screen", "") || "farm";
+}
+
+function syncGameTabNavigation() {
+  const navigation = document.querySelector('.tabs[aria-label="ゲーム画面"]');
+  if (!navigation) return;
+  GAME_TABS.forEach((tabId, index) => {
+    const button = navigation.querySelector(`.tab[data-tab="${tabId}"]`);
+    if (!button) return;
+    const ordinal = button.querySelector("span");
+    if (ordinal) ordinal.textContent = String(index + 1).padStart(2, "0");
+    navigation.appendChild(button);
+  });
 }
 
 function setActiveTabSilently(tabId = "farm") {
@@ -4465,6 +5237,8 @@ function resetOperationSurface({ resetAudio = false } = {}) {
   selectedShopCategory = "seeds";
   selectedInfoBookId = "gardening_intro";
   selectedInfoEntryId = "";
+  selectedLaborRobotId = "";
+  laborBlueprintView = { x: 34, y: 34, zoom: 1 };
   setActiveTabSilently("farm");
   if (resetAudio && state?.audio) {
     state.audio.noiseCanceling = false;
@@ -5436,7 +6210,9 @@ function openAutomationPanelForEquipment(kind, id) {
   const item = record?.item;
   if (!item || !canOpenAutomationPanel(kind, item)) return false;
   if (item.type === "support_robot") {
-    showSupportRobotPanel(item);
+    selectedLaborRobotId = item.id;
+    switchTab("labor");
+    renderLabor();
     if (!hasAnySupportOS()) triggerComms("support_robot_os_required");
     return true;
   }
@@ -6405,16 +7181,23 @@ function buySeed(cropId) {
     return;
   }
   const crop = CROPS[cropId];
-  if (state.money < crop.seedPrice) {
+  const price = currentSeedPrice(cropId);
+  if (state.money < price) {
     toast("Action failed.", "error");
     return;
   }
-  state.money -= crop.seedPrice;
-  addRadarSuspicion(radarPurchaseSuspicion(crop.seedPrice));
-  state.seeds[cropId] += crop.packSize;
-  trackPurchase("seed", cropId, crop.seedPrice, { itemName: crop.name, packSize: crop.packSize });
+  state.money -= price;
+  addRadarSuspicion(radarPurchaseSuspicion(price));
+  state.seeds[cropId] = (state.seeds[cropId] || 0) + crop.packSize;
+  trackPurchase("seed", cropId, price, {
+    itemName: crop.name,
+    packSize: crop.packSize,
+    packCount: 1,
+    unitPrice: price,
+    basePrice: seedMarketBasePrice(cropId)
+  });
   selectedSeed = cropId;
-  setStatus(`${crop.name} seed pack purchased. +${crop.packSize} seeds.`);
+  setStatus(crop.name + " seed pack purchased for ₡" + formatNumber(price) + ". +" + crop.packSize + " seeds.");
   playSound("buy_seed");
   pulseElement(document.getElementById("money-value"));
   const commsContext = {
@@ -6423,14 +7206,14 @@ function buySeed(cropId) {
     cropId,
     cropName: crop.name,
     itemName: crop.name,
-    packSize: crop.packSize
+    packSize: crop.packSize,
+    price
   };
   triggerComms("buy_seed", commsContext);
   triggerComms("buy_item", commsContext);
   saveGame();
   render();
 }
-
 function buyEquipment(itemId) {
   if (!isUnlocked("shop_item", itemId)) {
     toast("Action unavailable right now.", "warning");
@@ -6483,6 +7266,7 @@ function buyEquipment(itemId) {
     const device = createFloorDevice(itemId);
     device.tags = tags;
     currentFloorDevices().push(device);
+    if (itemId === "support_robot") supportRobotRoster();
     placementSelection = { kind: "device", id: device.id };
     selectedDeviceId = device.id;
   }
@@ -6856,7 +7640,7 @@ function processRealtimeGrowth(deltaDays) {
     const continuous = Boolean(GROW_UNITS[shelf.type]?.continuous);
     if (!continuous) {
       plant.growth += deltaDays * perf.growth;
-      if (updatePlantVisualStage(plant)) farmRenderRequested = true;
+      if (updatePlantVisualStage(plant)) requestFarmRender(base);
       if (plant.growth >= CROPS[plant.crop].days) {
         plant.growth = CROPS[plant.crop].days;
         plant.ready = true;
@@ -6867,7 +7651,7 @@ function processRealtimeGrowth(deltaDays) {
         trackPlantReady(plant, shelf);
         triggerSRankReadyComms(plant, shelf, base);
         toast(`${CROPS[plant.crop].name}が収穫可能になりました`);
-        farmRenderRequested = true;
+        requestFarmRender(base);
         playSound("crop_ready", 0.24);
       }
       return;
@@ -6884,7 +7668,7 @@ function processRealtimeGrowth(deltaDays) {
         plant.dead = true;
         trackDeadPlantAnalytics(plant, shelf, "wither");
         plant.ready = false;
-        farmRenderRequested = true;
+        requestFarmRender(base);
         playSound("plant_wither", 0.2);
       }
       return;
@@ -6893,7 +7677,7 @@ function processRealtimeGrowth(deltaDays) {
     plant.witherProgress = Math.max(0, (plant.witherProgress || 0) - deltaDays * 0.5);
     const growthFactor = Math.max(0.25, Math.min(waterRatio, nutrientRatio));
     plant.growth += deltaDays * growthFactor * perf.growth;
-    if (updatePlantVisualStage(plant)) farmRenderRequested = true;
+    if (updatePlantVisualStage(plant)) requestFarmRender(base);
     if (plant.growth >= CROPS[plant.crop].days) {
       plant.growth = CROPS[plant.crop].days;
       plant.ready = true;
@@ -6904,7 +7688,7 @@ function processRealtimeGrowth(deltaDays) {
       trackPlantReady(plant, shelf);
       triggerSRankReadyComms(plant, shelf, base);
       toast(`${CROPS[plant.crop].name}が収穫可能になりました`);
-      farmRenderRequested = true;
+      requestFarmRender(base);
       playSound("crop_ready", 0.24);
     }
   });
@@ -6921,7 +7705,7 @@ function processDirt(deltaDays) {
       const wasCleanEnough = !needsCleaning(item);
       item.dirt = Math.min(100, (item.dirt || 0) + deltaDays * 7 * dirtMod);
       if (wasCleanEnough && needsCleaning(item)) {
-        farmRenderRequested = true;
+        requestFarmRender(base);
         triggerComms("first_cleaning_needed", { kind: item.slots ? "unit" : "device", itemId: item.type });
       }
     });
@@ -6990,7 +7774,7 @@ function harvestPlantByRobot(base, unit, slotIndex, robot) {
   trackHarvestAnalytics(plant, unit, 1);
   if (plant.crop === "tomato") state.tomatoHarvested = true;
   unit.slots[slotIndex] = null;
-  farmRenderRequested = true;
+  requestFarmRender(base);
   state.marketTabUnlocked = true;
   const target = base.id === currentBase().id ? document.querySelector(`[data-shelf="${currentShelves().findIndex((entry) => entry.id === unit.id)}"][data-slot="${slotIndex}"]`) : null;
   if (target) {
@@ -7070,25 +7854,41 @@ function configuredShippingEntries() {
     .filter(([cropId, config]) => CROPS[cropId] && config.enabled);
 }
 
+function buySeedPacksByRobot(cropId, packs = 1) {
+  const crop = CROPS[cropId];
+  const packCount = clamp(Math.floor(Number(packs) || 1), 1, 12);
+  if (!crop || !isUnlocked("seed_item", cropId)) return false;
+  const unitPrice = currentSeedPrice(cropId);
+  const totalPrice = unitPrice * packCount;
+  if (state.money < totalPrice) return false;
+
+  const seedCount = crop.packSize * packCount;
+  state.money -= totalPrice;
+  addRadarSuspicion(radarPurchaseSuspicion(totalPrice));
+  state.seeds[cropId] = (state.seeds[cropId] || 0) + seedCount;
+  trackPurchase("seed", cropId, totalPrice, {
+    itemName: crop.name,
+    packSize: seedCount,
+    packCount,
+    unitPrice,
+    basePrice: seedMarketBasePrice(cropId),
+    automated: true
+  });
+  botActionLog("BOT // " + crop.name + " seed packs purchased. x" + packCount + " / ₡" + formatNumber(totalPrice));
+  playSound("buy_seed", 0.11);
+  return true;
+}
+
 function buySeedsByRobot() {
   const entry = configuredProcurementEntries().find(([cropId, config]) => {
     const crop = CROPS[cropId];
     if (!crop || !isUnlocked("seed_item", cropId)) return false;
     const targetSeeds = crop.packSize * Math.max(1, config.packs || 1);
-    return (state.seeds[cropId] || 0) < targetSeeds && state.money >= crop.seedPrice;
+    return (state.seeds[cropId] || 0) < targetSeeds && state.money >= currentSeedPrice(cropId);
   });
   if (!entry) return false;
-  const [cropId] = entry;
-  const crop = CROPS[cropId];
-  state.money -= crop.seedPrice;
-  addRadarSuspicion(radarPurchaseSuspicion(crop.seedPrice));
-  state.seeds[cropId] = (state.seeds[cropId] || 0) + crop.packSize;
-  trackPurchase("seed", cropId, crop.seedPrice, { itemName: crop.name, packSize: crop.packSize, automated: true });
-  botActionLog(`BOT // ${crop.name} seed pack purchased.`);
-  playSound("buy_seed", 0.11);
-  return true;
+  return buySeedPacksByRobot(entry[0], 1);
 }
-
 function sellInventoryByRobot(cropId, marketId) {
   if (!canSellCropToMarket(cropId, marketId)) return false;
   const batches = state.inventory.filter((item) => item.crop === cropId && Math.max(0, Number(item.qty) || 0) > 0);
@@ -7154,9 +7954,10 @@ function sellConfiguredInventoryByRobot() {
   return soldAny;
 }
 
-function findSupportHarvestTarget(base, robot) {
+function findSupportHarvestTarget(base, robot, respectLegacyToggle = false) {
   ensureSupportRobotProfile(robot);
-  if (!state.supportOS?.harvest || !robot.harvestAutomation?.enabled) return null;
+  if (!state.supportOS?.harvest) return null;
+  if (respectLegacyToggle && !robot.harvestAutomation?.enabled) return null;
   for (const unit of base.shelves) {
     if (!unit.placed || !supportRobotCanReach(robot, unit, "unit")) continue;
     const slotIndex = unit.slots.findIndex((plant) => plant?.ready);
@@ -7194,16 +7995,19 @@ function notifySupportPlantingShortage(base, robot, cropId, unit, plantingCost) 
   return true;
 }
 
-function findSupportPlantingTarget(base, robot) {
+function findSupportPlantingTarget(base, robot, cropIdOverride = "", { silent = false } = {}) {
   ensureSupportRobotProfile(robot);
   const planting = robot.plantingAutomation || {};
-  if (!state.supportOS?.planting || !planting.enabled) {
-    clearSupportPlantingShortageNotice(robot);
+  const usesBlueprintCrop = Boolean(cropIdOverride && CROPS[cropIdOverride]);
+  if (!state.supportOS?.planting || (!usesBlueprintCrop && !planting.enabled)) {
+    if (!silent) clearSupportPlantingShortageNotice(robot);
     return null;
   }
-  const cropId = CROPS[planting.cropId] ? planting.cropId : "lettuce";
-  if ((state.seeds[cropId] || 0) <= 0) {
-    clearSupportPlantingShortageNotice(robot);
+  const cropId = usesBlueprintCrop
+    ? cropIdOverride
+    : (CROPS[planting.cropId] ? planting.cropId : "lettuce");
+  if ((usesBlueprintCrop && !isUnlocked("seed_item", cropId)) || (state.seeds[cropId] || 0) <= 0) {
+    if (!silent) clearSupportPlantingShortageNotice(robot);
     return null;
   }
 
@@ -7221,9 +8025,9 @@ function findSupportPlantingTarget(base, robot) {
     return { unit, slotIndex, cropId };
   }
 
-  if (shortageTarget) {
+  if (!silent && shortageTarget) {
     notifySupportPlantingShortage(base, robot, cropId, shortageTarget.unit, shortageTarget.plantingCost);
-  } else {
+  } else if (!silent) {
     clearSupportPlantingShortageNotice(robot);
   }
   return null;
@@ -7254,57 +8058,383 @@ function supportAutomationRunHint(type) {
 }
 
 
+function supportProcurementTargetExists() {
+  return configuredProcurementEntries().some(([cropId, config]) => {
+    const crop = CROPS[cropId];
+    if (!crop || !isUnlocked("seed_item", cropId)) return false;
+    const targetSeeds = crop.packSize * Math.max(1, config.packs || 1);
+    return (state.seeds[cropId] || 0) < targetSeeds && state.money >= currentSeedPrice(cropId);
+  });
+}
+
+function findSupportProcurementTarget(base, robot, node) {
+  const cropId = CROPS[node?.cropId] ? node.cropId : "";
+  const packs = clamp(Math.floor(Number(node?.packs) || 1), 1, 12);
+  if (!cropId || !isUnlocked("seed_item", cropId)) return null;
+  if (!baseHasReachableDevice(base, robot, "procurement_terminal")) return null;
+  const unitPrice = currentSeedPrice(cropId);
+  const totalPrice = unitPrice * packs;
+  if (state.money < totalPrice) return null;
+  return { cropId, packs, unitPrice, totalPrice };
+}
+function findSupportShippingTarget(base, robot, node) {
+  const cropId = CROPS[node?.cropId] ? node.cropId : "";
+  const marketId = MARKETS[node?.marketId] ? node.marketId : "";
+  if (!cropId || !marketId || !baseHasReachableDevice(base, robot, "shipping_hatch")) return null;
+  if (!canSellCropToMarket(cropId, marketId)) return null;
+  const hasStock = state.inventory.some((batch) => (
+    batch.crop === cropId && Math.max(0, Number(batch.qty) || 0) > 0
+  ));
+  return hasStock ? { cropId, marketId } : null;
+}
+
+function supportBlueprintActionUnlocked(type) {
+  if (!SUPPORT_BLUEPRINT_ACTION_TYPES.includes(type)) return false;
+  if (typeof supportBlueprintNodeUnlockState === "function") {
+    return Boolean(supportBlueprintNodeUnlockState(type)?.unlocked);
+  }
+  if (type === "harvest") return Boolean(state.supportOS?.harvest);
+  if (type === "plant") return Boolean(state.supportOS?.planting);
+  if (type === "cleaning") return Boolean(state.supportOS?.cleaning);
+  if (type === "ship") {
+    return ownedBases().some((base) => base.floorDevices?.some((device) => device.type === "shipping_hatch"));
+  }
+  if (type === "procure") {
+    return ownedBases().some((base) => base.floorDevices?.some((device) => device.type === "procurement_terminal"));
+  }
+  return false;
+}
+
+function supportBlueprintActionTarget(base, robot, node, { silent = false } = {}) {
+  if (!node || !supportBlueprintActionUnlocked(node.type)) return null;
+  if (node.type === "harvest") return findSupportHarvestTarget(base, robot);
+  if (node.type === "ship") return findSupportShippingTarget(base, robot, node);
+  if (node.type === "plant") return findSupportPlantingTarget(base, robot, node.cropId, { silent });
+  if (node.type === "procure") return findSupportProcurementTarget(base, robot, node);
+  if (node.type === "cleaning") return findSupportCleaningTarget(base, robot);
+  return null;
+}
+
+function supportBlueprintCompareNumber(actual, operator, expected) {
+  const left = Number(actual) || 0;
+  const right = Number(expected) || 0;
+  if (operator === "gt") return left > right;
+  if (operator === "lte") return left <= right;
+  if (operator === "lt") return left < right;
+  if (operator === "eq") return Math.abs(left - right) < 0.0001;
+  return left >= right;
+}
+
+function supportBlueprintConditionValue(base, robot, node) {
+  if (!node || node.type !== "condition") return false;
+  if (node.conditionSource === "action_available") {
+    const actionNode = {
+      type: SUPPORT_BLUEPRINT_ACTION_TYPES.includes(node.actionType) ? node.actionType : "plant",
+      cropId: CROPS[node.cropId] ? node.cropId : "lettuce",
+      marketId: MARKETS[node.marketId] ? node.marketId : "lower",
+      packs: clamp(Math.floor(Number(node.packs) || 1), 1, 12)
+    };
+    return Boolean(supportBlueprintActionTarget(base, robot, actionNode, { silent: true }));
+  }
+
+  let actual = 0;
+  if (node.conditionSource === "inventory") {
+    actual = node.cropId === "*"
+      ? state.inventory.reduce((sum, batch) => sum + Math.max(0, Number(batch.qty) || 0), 0)
+      : cropStockCount(CROPS[node.cropId] ? node.cropId : "lettuce");
+  } else if (node.conditionSource === "seed") {
+    actual = state.seeds[CROPS[node.cropId] ? node.cropId : "lettuce"] || 0;
+  } else if (node.conditionSource === "seed_price") {
+    actual = currentSeedPrice(CROPS[node.cropId] ? node.cropId : "lettuce");
+  } else if (node.conditionSource === "money") {
+    actual = state.money;
+  } else if (node.conditionSource === "water") {
+    actual = state.water;
+  } else if (node.conditionSource === "nutrient") {
+    actual = state.nutrient;
+  } else if (node.conditionSource === "energy") {
+    actual = robot.supportEnergy;
+  } else if (node.conditionSource === "morale") {
+    actual = robot.supportMorale;
+  }
+  return supportBlueprintCompareNumber(actual, node.operator, node.value);
+}
+
+function supportBlueprintOrderedLinks(context, fromId, fromPin) {
+  return context.blueprint.links
+    .filter((link) => link.from === fromId && link.fromPin === fromPin)
+    .sort((left, right) => {
+      const leftNode = context.nodeById.get(left.to);
+      const rightNode = context.nodeById.get(right.to);
+      const yDelta = (Number(leftNode?.y) || 0) - (Number(rightNode?.y) || 0);
+      if (Math.abs(yDelta) > 0.001) return yDelta;
+      const xDelta = (Number(leftNode?.x) || 0) - (Number(rightNode?.x) || 0);
+      if (Math.abs(xDelta) > 0.001) return xDelta;
+      return (Number(left.order) || 0) - (Number(right.order) || 0);
+    });
+}
+
+function supportBlueprintBooleanInput(context, nodeId, pinId = "condition") {
+  const link = context.blueprint.links.find((entry) => entry.to === nodeId && entry.toPin === pinId);
+  if (!link) return null;
+  const source = context.nodeById.get(link.from);
+  if (!source || source.type !== "condition" || link.fromPin !== "value") return null;
+  return supportBlueprintConditionValue(context.base, context.robot, source);
+}
+
+function resetSupportBlueprintSubtreeMemory(context, nodeId, visited = new Set()) {
+  if (!nodeId || visited.has(nodeId)) return;
+  visited.add(nodeId);
+  delete context.runtime.memory[nodeId];
+  const node = context.nodeById.get(nodeId);
+  if (!node) return;
+  supportBlueprintPinSchema(node.type).outputs
+    .filter((pin) => pin.kind === "exec")
+    .forEach((pin) => {
+      supportBlueprintOrderedLinks(context, node.id, pin.id)
+        .forEach((link) => resetSupportBlueprintSubtreeMemory(context, link.to, visited));
+    });
+}
+
+function setSupportBlueprintNodeBadge(context, nodeId, text, kind = "") {
+  if (!context.runtime.nodeBadges || typeof context.runtime.nodeBadges !== "object") {
+    context.runtime.nodeBadges = {};
+  }
+  context.runtime.nodeBadges[nodeId] = {
+    text: String(text || ""),
+    kind: ["ok", "skip", "block"].includes(kind) ? kind : ""
+  };
+}
+
+function executeSupportBlueprintAction(context, node) {
+  const task = node.type;
+  if (!supportBlueprintActionUnlocked(task)) {
+    setSupportBlueprintNodeBadge(context, node.id, "OS LOCKED", "block");
+    return SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  }
+  const cooldownReady = supportRobotCooldownReady(context.robot, task);
+  const target = supportBlueprintActionTarget(context.base, context.robot, node, { silent: !cooldownReady });
+  if (!target || !cooldownReady || context.actionBudget <= 0 || !supportRobotTaskReady(context.robot, task)) {
+    setSupportBlueprintNodeBadge(context, node.id, "次へ", "skip");
+    return SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  }
+
+  let completed = false;
+  if (task === "harvest") {
+    completed = harvestPlantByRobot(context.base, target.unit, target.slotIndex, context.robot);
+  } else if (task === "ship") {
+    completed = sellInventoryByRobot(target.cropId, target.marketId);
+  } else if (task === "plant") {
+    completed = plantSeedByRobot(context.base, target.unit, target.slotIndex, target.cropId, context.robot);
+  } else if (task === "procure") {
+    completed = buySeedPacksByRobot(target.cropId, target.packs);
+  } else if (task === "cleaning") {
+    completed = cleanItemByRobot(context.base, target.kind, target.item, context.robot);
+  }
+  if (!completed) {
+    setSupportBlueprintNodeBadge(context, node.id, "次へ", "skip");
+    return SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  }
+
+  spendSupportRobotAction(context.robot, task);
+  context.actionBudget -= 1;
+  context.actedCount += 1;
+  context.runtime.activeNodeId = node.id;
+  setSupportBlueprintNodeBadge(context, node.id, "実行!", "ok");
+  return SUPPORT_BLUEPRINT_STATUS.SUCCESS;
+}
+
+function tickSupportBlueprintNode(context, nodeId) {
+  if (!nodeId || context.steps >= 96 || context.visiting.has(nodeId)) {
+    return SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  }
+  const node = context.nodeById.get(nodeId);
+  if (!node) return SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  context.steps += 1;
+  context.visiting.add(nodeId);
+  context.runtime.lastNodeId = nodeId;
+
+  let result = SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  if (node.type === "event") {
+    const child = supportBlueprintOrderedLinks(context, node.id, "out")[0];
+    result = child ? tickSupportBlueprintNode(context, child.to) : SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  } else if (node.type === "sequence") {
+    setSupportBlueprintNodeBadge(context, node.id, "順に探索");
+    for (const pinId of ["first", "second", "third"]) {
+      const child = supportBlueprintOrderedLinks(context, node.id, pinId)[0];
+      if (!child) continue;
+      const childResult = tickSupportBlueprintNode(context, child.to);
+      if (childResult !== SUPPORT_BLUEPRINT_STATUS.FAILURE) {
+        result = childResult;
+        break;
+      }
+    }
+  } else if (node.type === "branch") {
+    const condition = supportBlueprintBooleanInput(context, node.id);
+    if (condition === null) {
+      setSupportBlueprintNodeBadge(context, node.id, "BOOL未接続", "block");
+    } else {
+      const outputPin = condition ? "true" : "false";
+      setSupportBlueprintNodeBadge(context, node.id, condition ? "→ はい" : "→ いいえ");
+      const child = supportBlueprintOrderedLinks(context, node.id, outputPin)[0];
+      result = child ? tickSupportBlueprintNode(context, child.to) : SUPPORT_BLUEPRINT_STATUS.FAILURE;
+    }
+  } else if (node.type === "flipflop") {
+    const memory = context.runtime.memory[node.id] || { next: "a" };
+    const outputPin = memory.next === "b" ? "b" : "a";
+    context.runtime.memory[node.id] = { next: outputPin === "a" ? "b" : "a" };
+    setSupportBlueprintNodeBadge(context, node.id, "→ " + outputPin.toUpperCase());
+    const child = supportBlueprintOrderedLinks(context, node.id, outputPin)[0];
+    result = child ? tickSupportBlueprintNode(context, child.to) : SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  } else if (node.type === "daily") {
+    const day = Math.max(1, Math.floor(Number(state.day) || 1));
+    const memory = context.runtime.memory[node.id] || { lastDay: null };
+    const firstToday = memory.lastDay !== day;
+    context.runtime.memory[node.id] = { lastDay: day };
+    const outputPin = firstToday ? "first" : "already";
+    setSupportBlueprintNodeBadge(context, node.id, firstToday ? "→ 本日初回" : "→ 実行済み");
+    const child = supportBlueprintOrderedLinks(context, node.id, outputPin)[0];
+    result = child ? tickSupportBlueprintNode(context, child.to) : SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  } else if (node.type === "every") {
+    const everyN = [2, 3, 5].includes(Number(node.everyN)) ? Number(node.everyN) : 3;
+    const count = Math.max(0, Number(context.runtime.memory[node.id]?.count) || 0) + 1;
+    context.runtime.memory[node.id] = { count };
+    const isNth = count % everyN === 0;
+    const outputPin = isNth ? "nth" : "otherwise";
+    setSupportBlueprintNodeBadge(context, node.id, count + " / " + everyN + (isNth ? " → N回目" : " → それ以外"));
+    const child = supportBlueprintOrderedLinks(context, node.id, outputPin)[0];
+    result = child ? tickSupportBlueprintNode(context, child.to) : SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  } else if (node.type === "random") {
+    const probability = [25, 50, 75].includes(Number(node.probability)) ? Number(node.probability) : 50;
+    const hit = Math.random() * 100 < probability;
+    const outputPin = hit ? "hit" : "miss";
+    setSupportBlueprintNodeBadge(context, node.id, hit ? "→ 当たり" : "→ 外れ");
+    const child = supportBlueprintOrderedLinks(context, node.id, outputPin)[0];
+    result = child ? tickSupportBlueprintNode(context, child.to) : SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  } else if (node.type === "condition") {
+    const value = supportBlueprintConditionValue(context.base, context.robot, node);
+    setSupportBlueprintNodeBadge(context, node.id, value ? "TRUE" : "FALSE", value ? "ok" : "skip");
+    result = value ? SUPPORT_BLUEPRINT_STATUS.SUCCESS : SUPPORT_BLUEPRINT_STATUS.FAILURE;
+  } else if (node.type === "rest") {
+    const child = supportBlueprintOrderedLinks(context, node.id, "next")[0];
+    if (startSupportRobotChargeBreak(context.robot, node.id)) {
+      context.actedCount += 1;
+      context.runtime.activeNodeId = node.id;
+      setSupportBlueprintNodeBadge(context, node.id, "充電開始", "ok");
+      result = SUPPORT_BLUEPRINT_STATUS.RUNNING;
+    } else if (child) {
+      setSupportBlueprintNodeBadge(context, node.id, "充電不要 → 次へ", "skip");
+      result = tickSupportBlueprintNode(context, child.to);
+    } else {
+      setSupportBlueprintNodeBadge(context, node.id, "充電不要 / 接続なし", "skip");
+      result = SUPPORT_BLUEPRINT_STATUS.FAILURE;
+    }
+  } else if (SUPPORT_BLUEPRINT_ACTION_TYPES.includes(node.type)) {
+    result = executeSupportBlueprintAction(context, node);
+    if (result === SUPPORT_BLUEPRINT_STATUS.FAILURE) {
+      const child = supportBlueprintOrderedLinks(context, node.id, "failure")[0];
+      if (child) result = tickSupportBlueprintNode(context, child.to);
+    }
+  }
+
+  context.visiting.delete(nodeId);
+  return result;
+}
+
+function runSupportBlueprint(base, robot, { startNodeId = "", completedNodeId = "" } = {}) {
+  ensureSupportRobotProfile(robot);
+  const blueprint = robot.supportBlueprint;
+  const runtime = robot.supportBlueprintRuntime;
+  runtime.activeNodeId = "";
+  runtime.lastNodeId = "";
+  runtime.nodeBadges = {};
+  const context = {
+    base,
+    robot,
+    blueprint,
+    runtime,
+    nodeById: new Map(blueprint.nodes.map((node) => [node.id, node])),
+    visiting: new Set(),
+    actionBudget: 1,
+    actedCount: 0,
+    steps: 0
+  };
+  if (completedNodeId && context.nodeById.has(completedNodeId)) {
+    setSupportBlueprintNodeBadge(context, completedNodeId, "充電完了 → 次へ", "ok");
+  }
+  const entryNodeId = startNodeId && context.nodeById.has(startNodeId) ? startNodeId : blueprint.rootId;
+  const status = tickSupportBlueprintNode(context, entryNodeId);
+  runtime.lastStatus = status;
+  return { status, acted: context.actedCount > 0 };
+}
 function processSupportRobots(deltaDays) {
   ensureSupportAutomationState();
   if (!state.timeUnlocked || state.ended || state.paused) return;
   let acted = false;
+  const markActed = (base) => {
+    acted = true;
+    requestFarmRender(base);
+  };
   ownedBases().forEach((base) => {
-    base.floorDevices.filter((device) => device.type === "support_robot" && device.placed).forEach((robot) => {
-      ensureSupportRobotProfile(robot);
-      tickSupportRobotCooldowns(robot, deltaDays);
-      robot.supportEnergy = Math.min(SUPPORT_ROBOT_MAX_ENERGY, (Number(robot.supportEnergy) || 0) + deltaDays * 18);
+    base.floorDevices
+      .filter((device) => device.type === "support_robot" && device.placed)
+      .forEach((robot) => {
+        ensureSupportRobotProfile(robot);
+        const cooldownTick = tickSupportRobotCooldowns(robot, deltaDays);
+        robot.supportBlueprint = normalizeSupportBlueprint(robot.supportBlueprint);
 
-      const tryTask = (task, action) => {
-        if (!supportRobotTaskReady(robot, task)) return false;
-        if (!action()) return false;
-        spendSupportRobotAction(robot, task);
-        acted = true;
-        return true;
-      };
+        if (!supportRobotIsCharging(robot) && supportRobotResourcesDepleted(robot)) {
+          if (startSupportRobotForcedRecovery(robot)) markActed(base);
+        }
+        if (supportRobotIsCharging(robot)) {
+          const nodeId = robot.supportChargeNodeId;
+          const seconds = supportRobotChargeRemainingDays(robot) * REALTIME_DAY_MS / 1000;
+          robot.supportBlueprintRuntime.activeNodeId = nodeId;
+          robot.supportBlueprintRuntime.lastNodeId = nodeId;
+          robot.supportBlueprintRuntime.lastStatus = SUPPORT_BLUEPRINT_STATUS.RUNNING;
+          robot.supportBlueprintRuntime.nodeBadges = nodeId
+            ? { [nodeId]: { text: `充電中 ${seconds.toFixed(1)} SEC`, kind: "ok" } }
+            : {};
+          return;
+        }
+        let chargeContinuation = null;
+        if (cooldownTick.chargeCompleted) {
+          markActed(base);
+          if (cooldownTick.recoveryMode === "charge" && cooldownTick.chargeNodeId) {
+            chargeContinuation = robot.supportBlueprint.links.find((link) => (
+              link.from === cooldownTick.chargeNodeId && link.fromPin === "next"
+            )) || null;
+          }
+        }
 
-      const actions = [
-        ["harvest", () => {
-          const harvestTarget = findSupportHarvestTarget(base, robot);
-          return Boolean(harvestTarget && harvestPlantByRobot(base, harvestTarget.unit, harvestTarget.slotIndex, robot));
-        }],
-        ["ship", () => (
-          baseHasReachableDevice(base, robot, "shipping_hatch") && sellConfiguredInventoryByRobot()
-        )],
-        ["plant", () => {
-          const plantingTarget = findSupportPlantingTarget(base, robot);
-          return Boolean(plantingTarget && plantSeedByRobot(base, plantingTarget.unit, plantingTarget.slotIndex, plantingTarget.cropId, robot));
-        }],
-        ["cleaning", () => {
-          const cleaningTarget = findSupportCleaningTarget(base, robot);
-          return Boolean(cleaningTarget && cleanItemByRobot(base, cleaningTarget.kind, cleaningTarget.item, robot));
-        }],
-        ["procure", () => (
-          baseHasReachableDevice(base, robot, "procurement_terminal") && buySeedsByRobot()
-        )]
-      ];
+        const blueprintResult = runSupportBlueprint(base, robot, chargeContinuation ? {
+          startNodeId: chargeContinuation.to,
+          completedNodeId: cooldownTick.chargeNodeId
+        } : undefined);
+        if (blueprintResult.acted) {
+          markActed(base);
+          return;
+        }
 
-      actions.some(([task, action]) => tryTask(task, action));
-    });
+        const blueprintHandlesProcurement = robot.supportBlueprint.nodes.some((node) => node.type === "procure");
+        const canProcure = !blueprintHandlesProcurement
+          && baseHasReachableDevice(base, robot, "procurement_terminal")
+          && supportProcurementTargetExists();
+        if (canProcure && supportRobotTaskReady(robot, "procure") && buySeedsByRobot()) {
+          spendSupportRobotAction(robot, "procure");
+          markActed(base);
+        }
+      });
   });
+  const laborActive = document.getElementById("labor-screen")?.classList.contains("active");
+  if (laborActive && typeof updateLaborBlueprintRuntime === "function") {
+    updateLaborBlueprintRuntime();
+    updateLaborRobotVitals();
+  }
   if (acted) {
-    if (document.getElementById("farm-screen")?.classList.contains("active")) {
-      farmRenderRequested = false;
-      renderFarm();
-    } else {
-      farmRenderRequested = true;
-    }
     if (document.getElementById("market-screen")?.classList.contains("active")) renderMarkets();
     if (document.getElementById("shop-screen")?.classList.contains("active")) renderShop();
+
     const activeModalTitle = document.getElementById("modal-backdrop")?.classList.contains("hidden")
       ? ""
       : document.getElementById("modal-title")?.textContent;
@@ -7360,7 +8490,7 @@ function showSupportRobotPanel(device) {
   ensureSupportRobotProfile(device);
   const skill = supportRobotSkill(device);
   const personality = supportRobotPersonality(device);
-  const html = `<div class="device-detail support-automation-panel"><img src="${FLOOR_DEVICES.support_robot?.sprite || FLOOR_DEVICES.support_robot?.icon}" alt=""><div><h3>${escapeHtml(FLOOR_DEVICES.support_robot?.name || "Support Robot")}</h3><p>特技: ${escapeHtml(skill.name || device.robotSkillId)} // 収穫${supportTaskGrade(device, "harvest")} 植付${supportTaskGrade(device, "plant")} 清掃${supportTaskGrade(device, "cleaning")} 調達${supportTaskGrade(device, "procure")} 出荷${supportTaskGrade(device, "ship")}</p><p>性格: ${escapeHtml(personality.name || device.robotPersonalityId)} // 範囲 ${supportRobotRange(device)} / ENERGY ${Math.round(Number(device.supportEnergy) || 0)}%</p><p>OS: 収穫 ${state.supportOS.harvest ? "ONLINE" : "LOCKED"} / 植付 ${state.supportOS.planting ? "ONLINE" : "LOCKED"} / 清掃 ${state.supportOS.cleaning ? "ONLINE" : "LOCKED"}</p></div></div>${supportRobotHarvestPanel(device)}${supportRobotPlantingPanel(device)}`;
+  const html = `<div class="device-detail support-automation-panel"><img src="${FLOOR_DEVICES.support_robot?.sprite || FLOOR_DEVICES.support_robot?.icon}" alt=""><div><h3>${escapeHtml(FLOOR_DEVICES.support_robot?.name || "Support Robot")}</h3><p>特技: ${escapeHtml(skill.name || device.robotSkillId)} // 収穫${supportTaskGrade(device, "harvest")} 植付${supportTaskGrade(device, "plant")} 清掃${supportTaskGrade(device, "cleaning")} 調達${supportTaskGrade(device, "procure")} 出荷${supportTaskGrade(device, "ship")}</p><p>性格: ${escapeHtml(personality.name || device.robotPersonalityId)} // 範囲 ${supportRobotRange(device)} / 電力 ${Math.round(Number(device.supportEnergy) || 0)} / 気力 ${Math.round(Number(device.supportMorale) || 0)} / 効率 ${Math.round(supportRobotMoraleEfficiency(device) * 100)}%</p><p>OS: 収穫 ${state.supportOS.harvest ? "ONLINE" : "LOCKED"} / 植付 ${state.supportOS.planting ? "ONLINE" : "LOCKED"} / 清掃 ${state.supportOS.cleaning ? "ONLINE" : "LOCKED"}</p></div></div>${supportRobotHarvestPanel(device)}${supportRobotPlantingPanel(device)}`;
   showModal("SUPPORT ROBOT", "支援ロボット個体情報", html, true, false, "閉じる");
 }
 function cropChoiceButtons(actionPrefix, selectedCropId, { seedLocked = false } = {}) {
@@ -7376,9 +8506,11 @@ function cropStockCount(cropId) {
 
 function selectedAutomationCropCard(cropId, mode) {
   const crop = CROPS[cropId] || CROPS.lettuce;
+  const seedPrice = currentSeedPrice(cropId);
+  const trend = seedPriceTrend(cropId);
   const subline = mode === "shipping"
     ? `STOCK ${cropStockCount(cropId)}`
-    : `SEED ${state.seeds[cropId] || 0} / PACK ${crop.packSize}`;
+    : `SEED ${state.seeds[cropId] || 0} / PACK ${crop.packSize} / PRICE ₡${formatNumber(seedPrice)} ${trend.label}`;
   return `<div class="automation-selected-crop" style="--crop-color:${crop.color}">
     <img src="${crop.icon}" alt="">
     <div><strong>${escapeHtml(crop.name)}</strong><small>${subline}</small><p>${escapeHtml(crop.note || "")}</p></div>
@@ -8480,6 +9612,7 @@ function unlockDebugState() {
   state.shopUnlocked = true;
   state.brokerUnlocked = true;
   state.timeUnlocked = true;
+  grantFloorDevice("support_robot");
   state.unlocks ||= {};
   UNLOCK_RULES.forEach((rule) => {
     state.unlocks[rule.id] = true;
@@ -9217,6 +10350,7 @@ function renderResourceAlert(type, amount, dailyDemand) {
 
 function renderFarm() {
   const base = currentBase();
+  clearFarmRenderRequest(base);
   const shelves = currentShelves();
   const floorDevices = currentFloorDevices();
   const placementItem = selectedPlacementItem();
@@ -9279,9 +10413,14 @@ function renderFarm() {
   const placedDevices = floorDevices.filter((device) => device.placed).map((device) => {
     const definition = FLOOR_DEVICES[device.type];
     const deviceLabel = device.type === "light" ? "LED" : device.type === "fan" ? "FAN" : definition.code || definition.name;
+    const recoveryMode = device.type === "support_robot" ? supportRobotRecoveryMode(device) : "";
+    const recoveryLabel = recoveryMode === "forced" ? "休養中" : recoveryMode === "charge" ? "充電休憩中" : "";
+    const recoveryMarker = recoveryMode
+      ? `<span class="support-robot-rest-marker ${recoveryMode === "forced" ? "forced-rest" : "charge-break"}" role="img" aria-label="${recoveryLabel}" title="${recoveryLabel}"><span aria-hidden="true">${recoveryMode === "forced" ? "Z" : "⚡"}</span></span>`
+      : "";
     return `<button class="facility-item floor-device device-${device.type} device-running ${needsCleaning(device) ? "needs-cleaning" : ""} ${selectedDeviceId === device.id ? "selected" : ""}"
       style="grid-column:${device.x + 1};grid-row:${device.y + 1};z-index:${20 + device.y}" data-select-device="${device.id}" data-drag-kind="device" data-drag-id="${device.id}">
-      <img class="equipment-sprite" src="${freshCharacterAssetUrl(definition.sprite)}" alt="" draggable="false"><span class="device-field"></span><span class="item-label">${deviceLabel}</span>
+      <img class="equipment-sprite" src="${freshCharacterAssetUrl(definition.sprite)}" alt="" draggable="false"><span class="device-field"></span>${recoveryMarker}<span class="item-label">${deviceLabel}</span>
     </button>`;
   }).join("");
 
@@ -9669,14 +10808,16 @@ function cropResourcePreview(crop) {
 
 function renderSeedShopCard(cropId, crop) {
   const available = isUnlocked("seed_item", cropId);
+  const price = currentSeedPrice(cropId);
+  const trend = seedPriceTrend(cropId);
   return `
     <article class="shop-card ${available ? "" : "locked"}" style="--item-color:${crop.color}">
       <div class="shop-glyph"><img src="${crop.icon}" alt=""></div>
       <h3>${crop.name} 種子 x${crop.packSize}</h3>
-      <p>${available ? crop.note : unlockHint("seed_item", cropId, crop.note)}<br>${crop.packSize}粒パック / 成長 ${crop.days}日<br>${cropResourcePreview(crop)}</p>
+      <p>${available ? crop.note : unlockHint("seed_item", cropId, crop.note)}<br>${crop.packSize}粒パック / 成長 ${crop.days}日 / 基準 ₡${formatNumber(seedMarketBasePrice(cropId))}<br>${cropResourcePreview(crop)}</p>
       <footer>
-        <span class="shop-price">₡${crop.seedPrice}</span>
-        <button class="buy-button" data-buy-seed="${cropId}" data-guide-target="buy-seed-${cropId}" ${!available || state.money < crop.seedPrice ? "disabled" : ""}>${available ? `購入 +${crop.packSize}` : "LOCKED"}</button>
+        <span class="shop-price seed-market-price">₡${formatNumber(price)} <small class="seed-market-trend ${trend.direction}">${trend.label}</small></span>
+        <button class="buy-button" data-buy-seed="${cropId}" data-guide-target="buy-seed-${cropId}" ${!available || state.money < price ? "disabled" : ""}>${available ? `購入 +${crop.packSize}` : "LOCKED"}</button>
       </footer>
     </article>`;
 }
@@ -9873,7 +11014,8 @@ function infoCropStatsMarkup(cropId) {
   const market = MARKETS[crop.unlock]?.name || crop.unlock || "-";
   return `<div class="info-stat-grid">
     <div><span>成長</span><strong>${escapeHtml(crop.days)}日</strong></div>
-    <div><span>種価格</span><strong>₡${formatNumber(crop.seedPrice)}</strong></div>
+    <div><span>種子時価</span><strong>₡${formatNumber(currentSeedPrice(cropId))} ${escapeHtml(seedPriceTrend(cropId).label)}</strong></div>
+    <div><span>基準種価</span><strong>₡${formatNumber(seedMarketBasePrice(cropId))}</strong></div>
     <div><span>1パック</span><strong>${escapeHtml(crop.packSize)}粒</strong></div>
     <div><span>基礎価格</span><strong>₡${formatNumber(crop.basePrice)}</strong></div>
     <div><span>水</span><strong>${escapeHtml(crop.water)}/日</strong></div>
@@ -9959,12 +11101,14 @@ function render() {
   document.querySelector('[data-tab="broker"]')?.toggleAttribute("disabled", !state.brokerUnlocked);
   updateTabIndicators();
   renderHeader();
-  renderFarm();
+  if (farmScreenIsActive()) renderFarm();
+  else requestFarmRender();
   renderMarkets();
   renderSchedule();
   renderShop();
   renderBroker();
   renderRadio();
+  renderLabor();
   renderInfo();
   renderTimeControl();
   syncLoopAudio();
@@ -9974,16 +11118,15 @@ function render() {
 function renderRuntime() {
   ensureActiveTabAvailable();
   updateTabIndicators();
-renderHeader();
-  if (farmRenderRequested) {
-    farmRenderRequested = false;
-    renderFarm();
-  } else {
-    updateFarmProgress();
+  renderHeader();
+  if (farmScreenIsActive()) {
+    if (farmRenderIsRequested(currentBase())) renderFarm();
+    else updateFarmProgress();
   }
   if (document.getElementById("market-screen")?.classList.contains("active") && Date.now() >= saleBurstActiveUntil) renderInventory();
   if (document.getElementById("schedule-screen")?.classList.contains("active")) renderSchedule();
   if (document.getElementById("radio-screen")?.classList.contains("active")) renderRadio();
+  if (document.getElementById("labor-screen")?.classList.contains("active")) updateLaborRobotVitals();
   if (document.getElementById("info-screen")?.classList.contains("active")) renderInfo();
   renderTimeControl();
   syncLoopAudio();
@@ -10776,13 +11919,8 @@ function bindEvents() {
       cancelPlacementSelection();
       return;
     }
-    if (event.key === "1") switchTab("farm");
-    if (event.key === "2") switchTab("market");
-    if (event.key === "3") switchTab("shop");
-    if (event.key === "4") switchTab("schedule");
-    if (event.key === "5") switchTab("broker");
-    if (event.key === "6") switchTab("radio");
-    if (event.key === "7") switchTab("info");
+    const shortcutTab = GAME_TAB_SHORTCUTS[event.key];
+    if (shortcutTab) switchTab(shortcutTab);
   });
 }
 
@@ -10819,6 +11957,7 @@ async function bootstrap() {
   loadGame();
   applyUiScale();
   setInputDiagnosticStage("events:bind");
+  syncGameTabNavigation();
   bindEvents();
   inputDiagnosticState.bindEventsReached = true;
   updateFullscreenButton();

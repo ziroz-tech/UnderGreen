@@ -23,6 +23,16 @@
   const GREEN = "114,255,184";
   const YELLOW = "245,214,91";
   const RED = "255,92,114";
+  const BLACKOUT_CHATTER_MIN_MS = 1750;
+  const BLACKOUT_CHATTER_MAX_MS = 2850;
+  const BLACKOUT_CHATTER_LIFETIME_MS = 4200;
+  const BLACKOUT_CHATTER_SLOTS = [
+    { x: 41, y: 20, tail: "left" },
+    { x: 70, y: 30, tail: "right" },
+    { x: 52, y: 47, tail: "left" },
+    { x: 76, y: 57, tail: "right" },
+    { x: 35, y: 62, tail: "left" }
+  ];
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const rand = (min, max) => min + Math.random() * (max - min);
@@ -61,6 +71,12 @@
         '<span>ALERT <b id="radar-alert-value">0%</b></span>',
       '</div>',
     '</div>',
+    '<span class="radar-tab-pulse" id="radar-tab-pulse" aria-hidden="true">',
+      '<i class="radar-tab-pulse-dot"></i>',
+      '<i class="radar-tab-pulse-ring" data-ring="1"></i>',
+      '<i class="radar-tab-pulse-ring" data-ring="2"></i>',
+      '<i class="radar-tab-pulse-ring" data-ring="3"></i>',
+    '</span>',
     '<button class="radar-tab" id="radar-tab" type="button" aria-expanded="false">RADAR</button>'
   ].join("");
   document.body.appendChild(win);
@@ -69,6 +85,7 @@
   blackout.id = "farm-blackout";
   blackout.setAttribute("aria-hidden", "true");
   blackout.innerHTML = [
+    '<div class="blackout-chatter" id="blackout-chatter" aria-hidden="true"></div>',
     '<div class="blackout-label">',
       '<small>MAIN POWER OFFLINE</small>',
       '農場系統停止中 / 熱・光・電磁シグネチャ低下',
@@ -106,6 +123,7 @@
   const nearestEl = win.querySelector("#radar-nearest");
   const countEl = win.querySelector("#radar-count");
   const alertValueEl = win.querySelector("#radar-alert-value");
+  const blackoutChatter = blackout.querySelector("#blackout-chatter");
 
   let snapshot = bridge.getSnapshot();
   let muted = false;
@@ -121,6 +139,12 @@
   let sweep = 0;
   let canvasSize = 0;
   let canvasDpr = 1;
+  let blackoutChatterTimer = null;
+  let blackoutChatterActive = false;
+  let blackoutBubbleIndex = 0;
+  let blackoutRobotIndex = 0;
+  let blackoutLastLineId = "";
+  const blackoutBubbleTimers = new Set();
 
   tab.addEventListener("click", () => {
     const open = !win.classList.contains("open");
@@ -187,12 +211,95 @@
     tab.setAttribute("aria-expanded", String(open));
   }
 
+  function readBlackoutChatterData() {
+    if (typeof bridge.getSupportRobotBlackoutData !== "function") return { robots: [], lines: [] };
+    try {
+      const data = bridge.getSupportRobotBlackoutData() || {};
+      return {
+        robots: Array.isArray(data.robots) ? data.robots.filter((robot) => robot?.id) : [],
+        lines: Array.isArray(data.lines) ? data.lines.filter((line) => line?.text && Number(line.weight) > 0) : []
+      };
+    } catch (error) {
+      return { robots: [], lines: [] };
+    }
+  }
+
+  function pickBlackoutLine(lines) {
+    const fresh = lines.filter((line) => lines.length < 2 || line.id !== blackoutLastLineId);
+    const candidates = fresh.length ? fresh : lines;
+    const totalWeight = candidates.reduce((total, line) => total + Math.max(0, Number(line.weight) || 0), 0);
+    if (totalWeight <= 0) return null;
+    let cursor = rand(0, totalWeight);
+    const selected = candidates.find((line) => {
+      cursor -= Math.max(0, Number(line.weight) || 0);
+      return cursor <= 0;
+    }) || candidates[candidates.length - 1];
+    blackoutLastLineId = selected.id || selected.text;
+    return selected;
+  }
+
+  function clearBlackoutChatter() {
+    window.clearTimeout(blackoutChatterTimer);
+    blackoutChatterTimer = null;
+    blackoutBubbleTimers.forEach((timer) => window.clearTimeout(timer));
+    blackoutBubbleTimers.clear();
+    blackoutChatter.replaceChildren();
+  }
+
+  function showBlackoutChatterBubble() {
+    if (!blackoutChatterActive) return;
+    const data = readBlackoutChatterData();
+    if (data.robots.length && data.lines.length) {
+      const robot = data.robots[blackoutRobotIndex % data.robots.length];
+      const line = pickBlackoutLine(data.lines);
+      blackoutRobotIndex += 1;
+      if (line) {
+        const slot = BLACKOUT_CHATTER_SLOTS[blackoutBubbleIndex % BLACKOUT_CHATTER_SLOTS.length];
+        blackoutBubbleIndex += 1;
+        const bubble = document.createElement("div");
+        bubble.className = "blackout-robot-bubble";
+        bubble.dataset.tail = slot.tail;
+        bubble.dataset.robotId = robot.id;
+        bubble.style.setProperty("--bubble-x", `${slot.x}%`);
+        bubble.style.setProperty("--bubble-y", `${slot.y}%`);
+        bubble.title = robot.baseName || "";
+        const speaker = document.createElement("small");
+        speaker.textContent = robot.name || "サポートロボット";
+        const message = document.createElement("strong");
+        message.textContent = line.text;
+        bubble.append(speaker, message);
+        blackoutChatter.appendChild(bubble);
+        const removalTimer = window.setTimeout(() => {
+          blackoutBubbleTimers.delete(removalTimer);
+          bubble.remove();
+        }, BLACKOUT_CHATTER_LIFETIME_MS);
+        blackoutBubbleTimers.add(removalTimer);
+      }
+    }
+    blackoutChatterTimer = window.setTimeout(
+      showBlackoutChatterBubble,
+      rand(BLACKOUT_CHATTER_MIN_MS, BLACKOUT_CHATTER_MAX_MS)
+    );
+  }
+
+  function syncBlackoutChatter(active) {
+    if (blackoutChatterActive === active) return;
+    blackoutChatterActive = active;
+    clearBlackoutChatter();
+    if (!active) return;
+    blackoutBubbleIndex = 0;
+    blackoutRobotIndex = 0;
+    blackoutLastLineId = "";
+    blackoutChatterTimer = window.setTimeout(showBlackoutChatterBubble, 550);
+  }
+
   function syncPowerUi() {
     const unlocked = Boolean(snapshot.unlocked);
     const powerOn = snapshot.powerOn !== false;
     document.body.classList.toggle("farm-power-off", unlocked && !powerOn);
     blackout.classList.toggle("on", unlocked && !powerOn);
     blackout.setAttribute("aria-hidden", String(!unlocked || powerOn));
+    syncBlackoutChatter(unlocked && !powerOn);
     powerButton.classList.toggle("restart", !powerOn);
     powerButton.innerHTML = powerOn
       ? '<span aria-hidden="true">■</span> 電源を落とす'
@@ -485,14 +592,26 @@
     const intensity = snapshot.running ? metrics.intensity : 0;
     const inPulse = snapshot.running && metrics.distance <= PULSE_RADIUS;
     const imminent = snapshot.running && metrics.distance <= 0.055;
+    const approaching = snapshot.running && Boolean(approacher);
 
     win.style.setProperty("--radar-alert", intensity.toFixed(3));
     const pulseDuration = Math.round(1250 - intensity * 970) + "ms";
     win.style.setProperty("--radar-pulse-ms", pulseDuration);
+    const tabPulseDuration = Math.max(
+      420,
+      Math.round((2000 - intensity * 1300) * (approacher?.rapid ? 0.72 : 1))
+    );
+    win.style.setProperty("--radar-tab-pulse-ms", tabPulseDuration + "ms");
+    win.style.setProperty("--radar-tab-pulse-alpha", (0.5 + intensity * 0.48).toFixed(3));
+    win.style.setProperty("--radar-tab-pulse-scale", (4.5 + intensity * 1.5).toFixed(2));
     threatOverlay.style.setProperty("--radar-pulse-ms", pulseDuration);
+    win.classList.toggle("approaching", approaching);
+    win.classList.toggle("rapid", approaching && Boolean(approacher?.rapid));
     win.classList.toggle("caution", intensity > 0.02);
     win.classList.toggle("danger", inPulse);
     win.classList.toggle("imminent", imminent);
+    tab.setAttribute("aria-label", approaching ? "RADAR 管理局接近中" : "RADAR");
+    tab.title = approaching ? "管理局接近中 / 開いて確認" : "周辺監視レーダー";
     threatOverlay.style.opacity = String(intensity * 0.72);
 
     if (!snapshot.running) {
@@ -704,7 +823,9 @@
       drawScope();
       updateAlert(now);
     } else {
-      win.classList.remove("open", "caution", "danger", "imminent");
+      win.classList.remove("open", "approaching", "rapid", "caution", "danger", "imminent");
+      tab.setAttribute("aria-label", "RADAR");
+      tab.title = "周辺監視レーダー";
       threatOverlay.style.opacity = "0";
     }
 

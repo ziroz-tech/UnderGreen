@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#07110f">
   <title>UNDERGREEN | 違法水耕栽培シミュレーション</title>
   <link rel="icon" href="assets/icons/seed.webp" type="image/webp">
-    <link rel="stylesheet" href="styles.css?v=20260716a">
-  <link rel="stylesheet" href="radar.css?v=20260716a">
+    <link rel="stylesheet" href="styles.css?v=20260717n">
+  <link rel="stylesheet" href="radar.css?v=20260717c">
 </head>
 <body>
   <div class="scanlines" aria-hidden="true"></div>
@@ -79,10 +79,11 @@
       <button class="tab active" data-tab="farm"><span>01</span>栽培区画</button>
       <button class="tab" data-tab="market"><span>02</span>闇市場</button>
       <button class="tab" data-tab="shop"><span>03</span>調達端末</button>
-      <button class="tab" data-tab="schedule"><span>04</span>予定表</button>
-      <button class="tab" data-tab="broker"><span>05</span>不動産ブローカー</button>
-      <button class="tab" data-tab="radio"><span>06</span>ラジオ</button>
-      <button class="tab" data-tab="info"><span>07</span>情報</button>
+      <button class="tab" data-tab="labor"><span>04</span>労務管理</button>
+      <button class="tab" data-tab="schedule"><span>05</span>予定表</button>
+      <button class="tab" data-tab="broker"><span>06</span>不動産ブローカー</button>
+      <button class="tab" data-tab="radio"><span>07</span>ラジオ</button>
+      <button class="tab" data-tab="info"><span>08</span>情報</button>
     </nav>
 
     <main>
@@ -241,6 +242,65 @@
           <section class="radio-console">
             <div class="section-label"><span>RADIO CHANNELS</span><small>CSVで番組追加</small></div>
             <div class="radio-program-list" id="radio-program-list"></div>
+          </section>
+        </div>
+      </section>
+      <section class="screen" id="labor-screen">
+        <div class="screen-heading">
+          <div>
+            <p class="eyebrow">ROBOT WORKFORCE CONTROL</p>
+            <h2>労務管理</h2>
+          </div>
+          <div class="heading-stats" id="labor-summary"></div>
+        </div>
+        <div class="labor-layout">
+          <aside class="labor-roster-panel">
+            <div class="section-label"><span>SUPPORT UNITS</span><small>個体を選択</small></div>
+            <div class="labor-robot-list" id="labor-robot-list"></div>
+            <div class="labor-robot-detail" id="labor-robot-detail"></div>
+          </aside>
+          <section class="blueprint-console">
+            <div class="blueprint-toolbar">
+              <div>
+                <p class="eyebrow">BEHAVIOR BLUEPRINT</p>
+                <strong id="blueprint-robot-label">NO UNIT</strong>
+              </div>
+              <div class="blueprint-toolbar-actions">
+                <button class="secondary-button" data-blueprint-center type="button" title="表示を中央に戻す">CENTER</button>
+                <div class="blueprint-library-mode" role="group" aria-label="ノードライブラリ表示">
+                  <button class="active" data-blueprint-library-mode="simple" type="button" aria-pressed="true">simple</button>
+                  <button data-blueprint-library-mode="advanced" type="button" aria-pressed="false">advanced</button>
+                </div>
+                <label class="labor-tooltip-toggle" title="労務管理の説明表示を切り替え">
+                  <span>TOOLTIPS</span>
+                  <input data-labor-tooltip-toggle type="checkbox" checked aria-label="ツールチップ表示">
+                  <i aria-hidden="true"></i>
+                  <strong data-labor-tooltip-state>ON</strong>
+                </label>
+              </div>
+            </div>
+
+            <div class="blueprint-workbench">
+              <div class="labor-blueprint-editor" id="labor-blueprint-editor" aria-label="サポートロボットのブループリント編集領域">
+                <div class="labor-blueprint-world" id="labor-blueprint-world">
+                  <svg class="labor-blueprint-wires" id="labor-blueprint-wires" aria-hidden="true"></svg>
+                  <div id="labor-blueprint-nodes"></div>
+                </div>
+                <div class="blueprint-empty-hint" id="blueprint-empty-hint">START SIGNAL UNROUTED</div>
+              </div>
+              <aside class="blueprint-palette-panel">
+                <div class="section-label"><span>NODE LIBRARY</span><small>複数配置可</small></div>
+                <details class="blueprint-package-panel" open>
+                  <summary data-blueprint-package-toggle>
+                    <span>NODE PACKAGE</span>
+                    <small>PRESET</small>
+                  </summary>
+                  <div class="blueprint-package-list" data-blueprint-package-list></div>
+                </details>
+                <div class="blueprint-node-palette" id="blueprint-node-palette"></div>
+                <p class="blueprint-palette-note">FLOW GRAPH // PER-UNIT PROGRAM</p>
+              </aside>
+            </div>
           </section>
         </div>
       </section>
@@ -415,8 +475,9 @@
   </div>
 
   <div id="toast-container" aria-live="polite"></div>
-  <script src="game.js?v=20260716a"></script>
-  <script src="radar.js?v=20260716a"></script>
+  <script src="labor-blueprint.js?v=20260717s"></script>
+  <script src="game.js?v=20260718a"></script>
+  <script src="radar.js?v=20260717c"></script>
   <script src="comms-fx.js?v=20260716a"></script>
 </body>
 </html>
