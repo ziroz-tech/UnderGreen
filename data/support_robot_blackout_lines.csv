@@ -1,0 +1,11 @@
+id,text,weight,enabled
+scared,"怖いよ～",3,true
+stepped,"あ、なんか踏んだ！",3,true
+not_me,"いま動いたの、私じゃないです。",2,true
+shoulder,"誰ですか、いま肩を叩いたのは。",2,true
+left_arm,"私の左腕、どこですか？",1.5,true
+operator,"オペレーター、返事してください！",2,true
+dark_mode,"暗闇モードは標準装備にありません。",1.5,true
+cable,"充電ケーブルに誰か引っかかりました？",1.5,true
+self_check,"静かすぎて自己診断の音が大きいです。",1,true
+footing,"復旧したら、まず足元を確認しましょう。",1,true
