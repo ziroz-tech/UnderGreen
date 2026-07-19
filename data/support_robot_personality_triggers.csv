@@ -1,0 +1,5 @@
+personalityId,triggerId,timing,scope,conditionType,minCount,chance,effectType,effectTarget,resource,value,targetCount,message,enabled
+club_princess,club_princess_workplace,day_start,base,same_base_robot_count,2,0.10,resource_delta,random_same_base,morale,-10,1,{base}で会話が弾みすぎてサポートロボットの気力が少し消耗した。,true
+club_princess,club_princess_workplace,day_start,base,same_base_robot_count,3,0.20,resource_delta,random_same_base,morale,-10,1,{base}で会話が弾みすぎてサポートロボットの気力が少し消耗した。,true
+club_princess,club_princess_workplace,day_start,base,same_base_robot_count,4,0.35,resource_delta,random_same_base,morale,-10,1,{base}で会話が弾みすぎてサポートロボットの気力が少し消耗した。,true
+club_princess,club_princess_workplace,day_start,base,same_base_robot_count,5,0.50,resource_delta,random_same_base,morale,-10,2,{base}で会話が弾みすぎてサポートロボットの気力が少し消耗した。,true

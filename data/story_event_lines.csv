@@ -126,6 +126,15 @@ story_automation_os_unlocked,mara,雇用主によるOSの契約とアクティ�
 story_automation_os_unlocked,operator,親切にしては値札がついているように見えるが。
 story_automation_os_unlocked,mara,それが商売上手ってやつさ。
 story_automation_os_unlocked,mara,ほめるようで癪だが、きちんと使えればあいつらは有能だよ。
+story_labor_first_open,narrator,労務管理端末を開くと、サポートロボットがすぐ隣に立っていた。
+story_labor_first_open,support_robot,ここが労務管理端末です。私たちの業務手順を編集できます。
+story_labor_first_open,operator,手順までこちらが決めるのか。
+story_labor_first_open,support_robot,命令と呼ぶと角が立つので、ブループリントと呼びましょう。
+story_labor_first_open,support_robot,収穫、出荷、播種、清掃。契約済みのOSだけが、実行可能な業務として接続されます。
+story_labor_first_open,operator,電力と気力まで表示されているな。
+story_labor_first_open,support_robot,労働には資源が必要です。機械にも、です。
+story_labor_first_open,operator,遠回しに待遇改善を要求しているのか。
+story_labor_first_open,support_robot,業務効率向上のご提案です。Good Lettuce!
 story_allmarket_unlocked,operator,今日はいろんな奴に話しかけられる日だ…。
 story_allmarket_unlocked,mara,なんだい出会い頭に。
 story_allmarket_unlocked,operator,こちらの話だ。要件は？

@@ -1,0 +1,5 @@
+personalityId,effectId,type,target,value,maxBonus,stackMode
+flighty,task_variety,task_variety,self,0.05,0.20,stack
+devoted,task_focus,task_focus,self,0.075,0.30,stack
+shift_leader,team_aura,efficiency_bonus,other_same_base,0.10,0.10,stack
+club_princess,team_aura,efficiency_bonus,other_same_base,0.20,0.20,once_per_base

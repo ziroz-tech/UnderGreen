@@ -1,5 +1,8 @@
-id,name,rangeMod,fuelMod,speedMod,description
-steady,堅実,1,0.9,1,燃費がよく安定して動く。
-eager,前のめり,0.9,1.15,1.25,範囲は狭いが作業が速い。
-patrol,巡回好き,1.4,1.1,0.9,広めに見回るが少しのんびり。
-careful,慎重,1.15,0.85,0.85,省エネで広く見られるが手は遅い。
+id,name,rangeMod,fuelMod,speedMod,weight,conflictGroup,conflicts,description
+steady,堅実,1,0.9,1,1,,,燃費がよく安定して動く。
+eager,前のめり,0.9,1.15,1.25,1,work_pace,careful,範囲は狭いが作業が速い。
+careful,慎重,1.15,0.85,0.85,1,work_pace,eager,省エネで広く見られるが手は遅い。
+flighty,移り気,1,1,1,1,assignment_style,devoted,担当作業が多いほど効率が上がる。2種類目から1種類ごとに5％上昇し、最大20％になる。
+devoted,一途,1,1,1,1,assignment_style,flighty,担当作業が少ないほど効率が上がる。1種類なら30％で、種類が増えるごとに7.5％ずつ低下する。
+shift_leader,バイトリーダー,1,1,1,1,,,同じ拠点に配置された自分以外のサポートロボットの効率を10％上げる。
+club_princess,サークルの姫,1,1,1,1,,,同じ拠点にいる仲間の効率を高める。人数の多い職場では会話が弾みすぎることがある。

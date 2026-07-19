@@ -1,0 +1,4 @@
+id,count,weight,name,color
+standard,1,75,STANDARD,#79a58f
+rare,2,20,RARE,#48dbea
+exceptional,3,5,EXCEPTIONAL,#f5d65b

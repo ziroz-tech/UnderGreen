@@ -23,6 +23,9 @@ story_first_place_floor_lock_v1,operator,right,0,オペレーター,未登録栽
 story_automation_os_unlocked,mara,left,0,マーラ,種ブローカー,assets/characters/seed-broker.png
 story_automation_os_unlocked,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
 story_automation_os_unlocked,narrator,system,0,？？,,
+story_labor_first_open,support_robot,left,0,サポートロボット,認証サポート機,assets/characters/supportRobot-iso-leftdown.png
+story_labor_first_open,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
+story_labor_first_open,narrator,system,0,？？,,
 story_allmarket_unlocked,mara,left,0,マーラ,種ブローカー,assets/characters/seed-broker.png
 story_allmarket_unlocked,operator,right,0,オペレーター,未登録栽培者,assets/characters/protagonist.png
 story_pre_result_robot_interview,support_robot,left,0,サポートロボット,前農場・支援担当,assets/characters/supportRobot-iso-leftdown.png
