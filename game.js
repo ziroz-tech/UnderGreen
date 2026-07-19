@@ -16,6 +16,9 @@ let PROPERTY_COMMENTS = {};
 let FLOOR_DEVICES = {};
 let ROBOT_SKILLS = {};
 let ROBOT_PERSONALITIES = {};
+let ROBOT_PERSONALITY_EFFECTS = {};
+let ROBOT_PERSONALITY_TRIGGERS = [];
+let ROBOT_PERSONALITY_RARITIES = [];
 let SUPPORT_ROBOT_BLACKOUT_LINES = [];
 let EVENTS = [];
 let QUIET_NEWS = [];
@@ -200,6 +203,7 @@ let activeComms = null;
 let pendingComms = [];
 let activeStory = null;
 let pendingStories = [];
+let storyTextAnimationFrame = 0;
 let startScreenOpen = true;
 let pendingConfirmAction = null;
 let pendingDangerAction = null;
@@ -579,8 +583,13 @@ const SUPPORT_RESOURCE_EPSILON = 0.001;
 const SUPPORT_TASK_BASE_COOLDOWN = { harvest: 0.055, plant: 0.06, cleaning: 0.06, procure: 0.08, ship: 0.08 };
 const SUPPORT_TASK_BASE_COST = { harvest: 5, plant: 4, cleaning: 6, procure: 4, ship: 4 };
 const SUPPORT_TASKS = Object.keys(SUPPORT_TASK_BASE_COOLDOWN);
+const SUPPORT_ROBOT_IDLE_SCAN_MS = 400;
+const supportRobotProfileReady = new WeakSet();
+const supportAutomationStateReady = new WeakSet();
+const supportRobotNextIdleScanAt = new WeakMap();
 const SUPPORT_BLUEPRINT_ACTION_TYPES = ["harvest", "ship", "plant", "procure", "cleaning"];
 const SUPPORT_BLUEPRINT_TASK_TYPES = [...SUPPORT_BLUEPRINT_ACTION_TYPES, "rest"];
+const SUPPORT_PERSONALITY_TEAM_BONUS_CAP = 0.5;
 const SUPPORT_BLUEPRINT_CONTROL_TYPES = ["branch", "sequence", "flipflop", "daily", "every", "random"];
 const SUPPORT_BLUEPRINT_NODE_TYPES = [...SUPPORT_BLUEPRINT_CONTROL_TYPES, "condition", ...SUPPORT_BLUEPRINT_TASK_TYPES];
 const SUPPORT_BLUEPRINT_STATUS = Object.freeze({
@@ -725,6 +734,9 @@ const REQUIRED_GAME_DATA_PATHS = [
   "data/floor_devices.csv",
   "data/support_robot_skills.csv",
   "data/support_robot_personalities.csv",
+  "data/support_robot_personality_rarities.csv",
+  "data/support_robot_personality_effects.csv",
+  "data/support_robot_personality_triggers.csv",
   "data/support_robot_blackout_lines.csv",
   "data/equipment.csv",
   "data/unlocks.csv",
@@ -1112,11 +1124,78 @@ async function loadExternalData() {
   });
   await loadRequiredCsv("data/support_robot_personalities.csv", (rows) => {
     ROBOT_PERSONALITIES = rowsToObject(rows, (row) => ({
+      id: String(row.id || "").trim(),
       name: row.name,
       rangeMod: toNumber(row.rangeMod, 1),
       fuelMod: toNumber(row.fuelMod, 1),
       speedMod: toNumber(row.speedMod, 1),
+      weight: Math.max(0, toNumber(row.weight, 1)),
+      conflictGroup: String(row.conflictGroup || "").trim(),
+      conflicts: String(row.conflicts || "").split("|").map((id) => id.trim()).filter(Boolean),
       description: row.description
+    }));
+  });
+  await loadRequiredCsv("data/support_robot_personality_rarities.csv", (rows) => {
+    ROBOT_PERSONALITY_RARITIES = rows.map((row, index) => ({
+      id: String(row.id || `personality-rarity-${index + 1}`).trim(),
+      count: Math.max(1, Math.floor(toNumber(row.count, 1))),
+      weight: Math.max(0, toNumber(row.weight, 0)),
+      name: String(row.name || row.id || "STANDARD").trim(),
+      color: String(row.color || "#79a58f").trim()
+    })).filter((entry) => entry.weight > 0).sort((a, b) => a.count - b.count);
+  });
+  await loadRequiredCsv("data/support_robot_personality_effects.csv", (rows) => {
+    ROBOT_PERSONALITY_EFFECTS = rows.reduce((effectsByPersonality, row, index) => {
+      const personalityId = String(row.personalityId || "").trim();
+      const type = String(row.type || "").trim();
+      if (!personalityId || !type || !ROBOT_PERSONALITIES[personalityId]) return effectsByPersonality;
+      const effect = {
+        id: String(row.effectId || `${personalityId}-${index + 1}`).trim(),
+        personalityId,
+        type,
+        target: String(row.target || "self").trim(),
+        value: toNumber(row.value, 0),
+        maxBonus: Math.max(0, toNumber(row.maxBonus, 0)),
+        stackMode: String(row.stackMode || "stack").trim()
+      };
+      effectsByPersonality[personalityId] ||= [];
+      effectsByPersonality[personalityId].push(effect);
+      return effectsByPersonality;
+    }, {});
+  });
+  await loadRequiredCsv("data/support_robot_personality_triggers.csv", (rows) => {
+    const triggerGroups = new Map();
+    rows.forEach((row, index) => {
+      const personalityId = String(row.personalityId || "").trim();
+      const triggerId = String(row.triggerId || `${personalityId}-trigger-${index + 1}`).trim();
+      const timing = String(row.timing || "day_start").trim();
+      const enabled = String(row.enabled || "true").trim().toLowerCase() !== "false";
+      if (!enabled || !personalityId || !triggerId || !ROBOT_PERSONALITIES[personalityId]) return;
+      const groupKey = `${personalityId}:${triggerId}`;
+      if (!triggerGroups.has(groupKey)) {
+        triggerGroups.set(groupKey, {
+          id: triggerId,
+          personalityId,
+          timing,
+          scope: String(row.scope || "base").trim(),
+          conditionType: String(row.conditionType || "same_base_robot_count").trim(),
+          effectType: String(row.effectType || "resource_delta").trim(),
+          effectTarget: String(row.effectTarget || "random_same_base").trim(),
+          resource: String(row.resource || "morale").trim(),
+          tiers: []
+        });
+      }
+      triggerGroups.get(groupKey).tiers.push({
+        minCount: Math.max(0, Math.floor(toNumber(row.minCount, 0))),
+        chance: Math.max(0, Math.min(1, toNumber(row.chance, 0))),
+        value: toNumber(row.value, 0),
+        targetCount: Math.max(0, Math.floor(toNumber(row.targetCount, 1))),
+        message: String(row.message || "").trim()
+      });
+    });
+    ROBOT_PERSONALITY_TRIGGERS = [...triggerGroups.values()].map((trigger) => ({
+      ...trigger,
+      tiers: trigger.tiers.sort((a, b) => a.minCount - b.minCount)
     }));
   });
   await loadRequiredCsv("data/support_robot_blackout_lines.csv", (rows) => {
@@ -1955,6 +2034,7 @@ function setRadarPatrolCount(value, { relative = false } = {}) {
 }
 
 function queueRadarDemo() {
+  if (state?.debugMode) return false;
   const radar = ensureRadarState();
   radar.unlocked = true;
   radar.demoPending = true;
@@ -1965,6 +2045,7 @@ function queueRadarDemo() {
   radar.lastApproachDayFloat = Number(currentInventoryDayFloat().toFixed(4));
   saveGame();
   notifyRadarState();
+  return true;
 }
 
 function consumeRadarDemo() {
@@ -1978,6 +2059,7 @@ function consumeRadarDemo() {
 }
 
 function markRadarApproachStarted({ tutorial = false, guaranteed = false } = {}) {
+  if (state?.debugMode) return null;
   const radar = ensureRadarState();
   if (!radar.unlocked) return null;
   const dayFloat = Number(currentInventoryDayFloat().toFixed(4));
@@ -2019,6 +2101,7 @@ function setRadarPower(powerOn) {
 }
 
 function applyRadarFine() {
+  if (state?.debugMode) return null;
   const radar = ensureRadarState();
   if (!radar.unlocked || !radar.powerOn || radar.tutorialActive) return null;
   const fineIndex = Math.max(0, Math.min(RADAR_FINE_RATES.length - 1, radar.fineLevel));
@@ -2046,6 +2129,10 @@ function applyRadarFine() {
 function triggerPendingRadarUnlockConversation() {
   if (!state || startScreenOpen) return false;
   const radar = ensureRadarState();
+  if (state.debugMode) {
+    radar.unlockConversationPending = false;
+    return false;
+  }
   if (!radar.unlockConversationPending || state.storySeen?.story_radar_unlocked) {
     radar.unlockConversationPending = false;
     return false;
@@ -2100,6 +2187,7 @@ function createInitialState(mode = "day45") {
     equipment: { tanks: 0, filter: false, fridge: false },
     supportOS: { harvest: false, planting: false, cleaning: false },
     automation: createDefaultSupportAutomation(),
+    supportPersonalityTriggerState: { lastProcessed: {} },
     radar: createDefaultRadarState(),
     resourceRemainders: { water: 0, nutrient: 0 },
     dayProgress: 0,
@@ -2391,7 +2479,7 @@ function addNewsHistory(entry) {
 }
 
 function scheduleMarketForecast() {
-  if (!EVENTS.length) return null;
+  if (state?.debugMode || !EVENTS.length) return null;
   const event = EVENTS[Math.floor(Math.random() * EVENTS.length)];
   const leadDays = Math.max(2, event.leadDays || 5);
   const duration = Math.max(1, event.duration || 2);
@@ -2517,6 +2605,15 @@ function updateMarketForDay(options = {}) {
   });
   ensureMarketSignalsState();
   if (options.drift) driftMarketSignalsForDay();
+  if (state.debugMode) {
+    state.marketEventQueue = [];
+    state.marketEventOffsets = [];
+    state.event = null;
+    state.news = "DEBUG MODE // EVENTS DISABLED";
+    state.newsLabel = "EVENTS OFF";
+    if (!isMarketAvailable(selectedMarket)) selectedMarket = "lower";
+    return;
+  }
   updateMarketEventOffsets();
 
   state.marketEventQueue = state.marketEventQueue.filter((schedule) =>
@@ -2700,33 +2797,50 @@ function applyUnlock(rule) {
   }
 }
 
+function unlockEventContext(rule) {
+  return {
+    unlockId: rule.id,
+    unlockType: rule.type,
+    unlockTarget: rule.target,
+    target: rule.target,
+    marketId: rule.type === "market" ? rule.target : "",
+    itemId: ["shop_item", "seed_item"].includes(rule.type) ? rule.target : "",
+    cropId: rule.type === "seed_item" ? rule.target : ""
+  };
+}
+
+function unresolvedStoryUnlockEvents(rule, context) {
+  if (rule.type !== "story" || !rule.event || state?.debugMode) return [];
+  return STORY_EVENTS
+    .filter((event) => event.trigger === rule.event)
+    .filter((event) => requirementsMet(event.requirements || []))
+    .filter((event) => commsContextMatches(event.context || [], context))
+    .filter((event) => !state.storyChoices?.[event.id] && !hasQueuedStory(event));
+}
+
 function updateProgressionUnlocks({ silent = false } = {}) {
   state.unlocks ||= {};
+  const eventsEnabled = !silent && !state.debugMode;
   const unlockedEvents = [];
   const queuedEvents = new Set();
   UNLOCK_RULES.forEach((rule) => {
-    if (state.unlocks[rule.id]) return;
-    if (rule.initiallyUnlocked || requirementsMet(rule.requirements)) {
-      applyUnlock(rule);
-      if (!silent && rule.event && !queuedEvents.has(rule.event)) {
-        queuedEvents.add(rule.event);
-        unlockedEvents.push({
-          event: rule.event,
-          context: {
-            unlockId: rule.id,
-            unlockType: rule.type,
-            unlockTarget: rule.target,
-            target: rule.target,
-            marketId: rule.type === "market" ? rule.target : "",
-            itemId: ["shop_item", "seed_item"].includes(rule.type) ? rule.target : "",
-            cropId: rule.type === "seed_item" ? rule.target : ""
-          }
-        });
-      }
-    }
+    if (!rule.initiallyUnlocked && !requirementsMet(rule.requirements)) return;
+    const alreadyUnlocked = Boolean(state.unlocks[rule.id]);
+    const context = unlockEventContext(rule);
+    const pendingStoryEvents = eventsEnabled ? unresolvedStoryUnlockEvents(rule, context) : [];
+    if (!alreadyUnlocked) applyUnlock(rule);
+    const shouldQueueEvent = eventsEnabled
+      && rule.event
+      && (rule.type === "story" ? pendingStoryEvents.length > 0 : !alreadyUnlocked);
+    if (!shouldQueueEvent || queuedEvents.has(rule.event)) return;
+    pendingStoryEvents.forEach((event) => {
+      if (state.storySeen) delete state.storySeen[event.id];
+    });
+    queuedEvents.add(rule.event);
+    unlockedEvents.push({ event: rule.event, context });
   });
   startTitleTrackingIfReady();
-  if (!silent) {
+  if (eventsEnabled) {
     unlockedEvents.forEach(({ event, context }) => triggerComms(event, context));
     if (unlockedEvents.length) playSound("unlock_notice", 0.18);
   }
@@ -2984,10 +3098,18 @@ function loadGame() {
   ensureUiGuideState();
   ownedBases();
   supportRobotRoster();
+  ensureSupportPersonalityTriggerState();
   ensureProcurementTags();
   state.marketTabUnlocked = Boolean(state.marketTabUnlocked || state.tradeStats?.unitsSold > 0);
   state.automationTabUnlocked = Boolean(state.automationTabUnlocked || state.unlocks.automation_os_access);
   ensureRadarState();
+  if (state.debugMode) {
+    state.radar.unlockConversationPending = false;
+    state.radar.demoPending = false;
+    state.radar.demoConsumed = true;
+    state.radar.tutorialActive = false;
+    state.radar.tutorialResolved = true;
+  }
   if (!state.unlocks.radar_access && (Number(state.tradeStats?.revenue) || 0) >= 250 && !state.storySeen.story_radar_unlocked) {
     state.radar.unlockConversationPending = true;
   }
@@ -3003,6 +3125,7 @@ function loadGame() {
   restoreCommsState();
   if (!isMarketAvailable(selectedMarket)) selectedMarket = "lower";
   const hasLegacyImmediateEvent = state.event && !state.marketEventQueue.length;
+  if (state.debugMode) updateMarketForDay();
   if (!state.news || !Object.keys(state.marketSignals).length || hasLegacyImmediateEvent) updateMarketForDay();
   applyScheduleMarketSignals();
   if (loaded.sourceKey && loaded.sourceKey !== SAVE_KEY) saveGame();
@@ -3456,10 +3579,86 @@ function normalizeSupportBlueprint(source) {
   });
   return { version: 3, rootId, nodes, links };
 }
+function weightedRandomEntry(entries, weightKey = "weight") {
+  const candidates = (entries || []).filter((entry) => entry && Number(entry[weightKey]) > 0);
+  if (!candidates.length) return null;
+  const totalWeight = candidates.reduce((total, entry) => total + Number(entry[weightKey]), 0);
+  let roll = Math.random() * totalWeight;
+  for (const entry of candidates) {
+    roll -= Number(entry[weightKey]);
+    if (roll <= 0) return entry;
+  }
+  return candidates[candidates.length - 1];
+}
+
+function supportPersonalityIdsConflict(firstId, secondId) {
+  if (!firstId || !secondId || firstId === secondId) return true;
+  const first = ROBOT_PERSONALITIES[firstId];
+  const second = ROBOT_PERSONALITIES[secondId];
+  if (!first || !second) return true;
+  if (first.conflictGroup && first.conflictGroup === second.conflictGroup) return true;
+  return first.conflicts.includes(secondId) || second.conflicts.includes(firstId);
+}
+
+function randomSupportRobotPersonalityIds() {
+  const personalities = Object.values(ROBOT_PERSONALITIES).filter((entry) => entry?.id && entry.weight > 0);
+  const fallbackId = ROBOT_PERSONALITIES.steady?.id || personalities[0]?.id || "steady";
+  if (!personalities.length) return [fallbackId];
+  const rarityPool = ROBOT_PERSONALITY_RARITIES.filter((entry) => entry.count <= personalities.length);
+  const selectedRarity = weightedRandomEntry(rarityPool) || { count: 1 };
+  const targetCount = Math.max(1, Math.min(personalities.length, selectedRarity.count));
+  let bestSelection = [];
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const selected = [];
+    let pool = [...personalities];
+    while (selected.length < targetCount) {
+      const compatible = pool.filter((candidate) => selected.every((id) => !supportPersonalityIdsConflict(id, candidate.id)));
+      const next = weightedRandomEntry(compatible);
+      if (!next) break;
+      selected.push(next.id);
+      pool = pool.filter((candidate) => candidate.id !== next.id);
+    }
+    if (selected.length > bestSelection.length) bestSelection = selected;
+    if (selected.length === targetCount) return selected;
+  }
+  return bestSelection.length ? bestSelection : [fallbackId];
+}
+
+function normalizeSupportRobotPersonalityIds(device) {
+  const legacyId = ROBOT_PERSONALITIES[device.robotPersonalityId] ? device.robotPersonalityId : "";
+  const sourceIds = Array.isArray(device.robotPersonalityIds) ? device.robotPersonalityIds : (legacyId ? [legacyId] : []);
+  const normalized = [];
+  sourceIds.forEach((rawId) => {
+    const id = String(rawId || "").trim();
+    if (!ROBOT_PERSONALITIES[id] || normalized.includes(id)) return;
+    if (normalized.some((selectedId) => supportPersonalityIdsConflict(selectedId, id))) return;
+    normalized.push(id);
+  });
+  device.robotPersonalityIds = normalized.length ? normalized : randomSupportRobotPersonalityIds();
+  delete device.robotPersonalityId;
+  return device.robotPersonalityIds;
+}
+
+function supportRobotPersonalityIds(device) {
+  ensureSupportRobotProfile(device);
+  return [...device.robotPersonalityIds];
+}
+
+function supportRobotPersonalities(device) {
+  return supportRobotPersonalityIds(device).map((id) => ROBOT_PERSONALITIES[id]).filter(Boolean);
+}
+
+function supportRobotPersonalityRarity(device) {
+  const count = supportRobotPersonalityIds(device).length;
+  const exact = ROBOT_PERSONALITY_RARITIES.find((entry) => entry.count === count);
+  const fallback = [...ROBOT_PERSONALITY_RARITIES].reverse().find((entry) => count >= entry.count);
+  return exact || fallback || { id: "standard", count: 1, weight: 1, name: "STANDARD", color: "#79a58f" };
+}
 function ensureSupportRobotProfile(device) {
   if (!device || device.type !== "support_robot") return device;
+  if (supportRobotProfileReady.has(device)) return device;
   if (!ROBOT_SKILLS[device.robotSkillId]) device.robotSkillId = randomRecordId(ROBOT_SKILLS, "balanced");
-  if (!ROBOT_PERSONALITIES[device.robotPersonalityId]) device.robotPersonalityId = randomRecordId(ROBOT_PERSONALITIES, "steady");
+  normalizeSupportRobotPersonalityIds(device);
   device.robotName = typeof device.robotName === "string" ? device.robotName.trim().slice(0, 24) : "";
   device.isInitialSupportRobot = Boolean(device.isInitialSupportRobot);
   const maxEnergy = SUPPORT_ROBOT_MAX_ENERGY;
@@ -3514,6 +3713,7 @@ function ensureSupportRobotProfile(device) {
       ? previousRuntime.lastStatus
       : SUPPORT_BLUEPRINT_STATUS.FAILURE
   };
+  supportRobotProfileReady.add(device);
   return device;
 }
 
@@ -3551,6 +3751,7 @@ function normalizedShipAutomationEntry(source = {}, defaults = {}) {
 }
 
 function ensureSupportAutomationState() {
+  if (state && supportAutomationStateReady.has(state)) return;
   const previous = state.automation || {};
   const legacyProcCrop = CROPS[previous.procurement?.cropId] ? previous.procurement.cropId : "lettuce";
   const legacyShipCrop = CROPS[previous.shipping?.cropId] ? previous.shipping.cropId : "lettuce";
@@ -3591,6 +3792,7 @@ function ensureSupportAutomationState() {
       }
     }));
   }
+  supportAutomationStateReady.add(state);
 }
 function supportRobotSkill(device) {
   ensureSupportRobotProfile(device);
@@ -3598,8 +3800,256 @@ function supportRobotSkill(device) {
 }
 
 function supportRobotPersonality(device) {
-  ensureSupportRobotProfile(device);
-  return ROBOT_PERSONALITIES[device.robotPersonalityId] || ROBOT_PERSONALITIES.steady || { name: "Steady", rangeMod: 1, fuelMod: 1, speedMod: 1 };
+  const personalities = supportRobotPersonalities(device);
+  const ids = supportRobotPersonalityIds(device);
+  return {
+    id: ids.join("+"),
+    name: personalities.map((entry) => entry.name).join(" / ") || "Steady",
+    description: personalities.map((entry) => entry.description).filter(Boolean).join(" / "),
+    rangeMod: personalities.reduce((value, entry) => value * (Number(entry.rangeMod) || 1), 1),
+    fuelMod: personalities.reduce((value, entry) => value * (Number(entry.fuelMod) || 1), 1),
+    speedMod: personalities.reduce((value, entry) => value * (Number(entry.speedMod) || 1), 1),
+    rarity: supportRobotPersonalityRarity(device)
+  };
+}
+
+function supportRobotPersonalityEffects(device) {
+  return supportRobotPersonalityIds(device).flatMap((personalityId) => {
+    const effects = ROBOT_PERSONALITY_EFFECTS[personalityId];
+    return Array.isArray(effects) ? effects : [];
+  });
+}
+
+function supportRobotHasPersonality(device, personalityId) {
+  return supportRobotPersonalityIds(device).includes(personalityId);
+}
+
+function supportRobotAssignedTaskTypes(robot) {
+  ensureSupportRobotProfile(robot);
+  const blueprint = robot.supportBlueprint;
+  const nodeById = new Map(blueprint.nodes.map((node) => [node.id, node]));
+  const outgoing = new Map();
+  blueprint.links.forEach((link) => {
+    outgoing.set(link.from, [...(outgoing.get(link.from) || []), link.to]);
+  });
+
+  const assigned = new Set();
+  const visited = new Set();
+  const pending = [blueprint.rootId];
+  while (pending.length) {
+    const nodeId = pending.pop();
+    if (!nodeId || visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    const node = nodeById.get(nodeId);
+    if (SUPPORT_BLUEPRINT_ACTION_TYPES.includes(node?.type)) assigned.add(node.type);
+    (outgoing.get(nodeId) || []).forEach((nextId) => {
+      if (!visited.has(nextId)) pending.push(nextId);
+    });
+  }
+  return SUPPORT_BLUEPRINT_ACTION_TYPES.filter((task) => assigned.has(task));
+}
+
+function supportRobotBase(robot) {
+  if (!robot) return null;
+  return ownedBases().find((base) => base.floorDevices?.some((device) => device === robot)) || null;
+}
+
+function supportPersonalityEffectContribution(rawBonus, effect) {
+  const bonus = Number(rawBonus) || 0;
+  const cap = Number(effect?.maxBonus) || 0;
+  if (cap <= 0) return bonus;
+  return Math.max(-cap, Math.min(cap, bonus));
+}
+
+function supportRobotSelfEfficiencyBonus(robot, assignedTaskCount) {
+  return supportRobotPersonalityEffects(robot).reduce((total, effect) => {
+    if (effect.target !== "self") return total;
+    let contribution = 0;
+    if (effect.type === "task_variety" && assignedTaskCount > 0) {
+      contribution = Math.max(0, assignedTaskCount - 1) * effect.value;
+    } else if (effect.type === "task_focus" && assignedTaskCount > 0) {
+      contribution = Math.max(0, SUPPORT_BLUEPRINT_ACTION_TYPES.length - assignedTaskCount) * effect.value;
+    } else if (effect.type === "efficiency_bonus") {
+      contribution = effect.value;
+    }
+    return total + supportPersonalityEffectContribution(contribution, effect);
+  }, 0);
+}
+
+function supportRobotTeamEfficiencyBonus(robot) {
+  if (!robot?.placed) return 0;
+  const base = supportRobotBase(robot);
+  if (!base) return 0;
+  const appliedBaseEffects = new Set();
+  const bonus = base.floorDevices.reduce((total, teammate) => {
+    if (teammate === robot || teammate.type !== "support_robot" || !teammate.placed) return total;
+    const teammateBonus = supportRobotPersonalityEffects(teammate).reduce((subtotal, effect) => {
+      if (effect.target !== "other_same_base" || effect.type !== "efficiency_bonus") return subtotal;
+      const effectKey = `${effect.personalityId}:${effect.id}`;
+      if (effect.stackMode === "once_per_base") {
+        if (appliedBaseEffects.has(effectKey)) return subtotal;
+        appliedBaseEffects.add(effectKey);
+      }
+      return subtotal + supportPersonalityEffectContribution(effect.value, effect);
+    }, 0);
+    return total + teammateBonus;
+  }, 0);
+  return Math.max(-SUPPORT_PERSONALITY_TEAM_BONUS_CAP, Math.min(SUPPORT_PERSONALITY_TEAM_BONUS_CAP, bonus));
+}
+
+function ensureSupportPersonalityTriggerState() {
+  if (!state.supportPersonalityTriggerState || typeof state.supportPersonalityTriggerState !== "object") {
+    state.supportPersonalityTriggerState = {};
+  }
+  if (!state.supportPersonalityTriggerState.lastProcessed || typeof state.supportPersonalityTriggerState.lastProcessed !== "object") {
+    state.supportPersonalityTriggerState.lastProcessed = {};
+  }
+  return state.supportPersonalityTriggerState;
+}
+
+function supportPersonalityTriggerRobots(base) {
+  return (base?.floorDevices || [])
+    .filter((robot) => robot.type === "support_robot" && robot.placed)
+    .map((robot) => ensureSupportRobotProfile(robot));
+}
+
+function supportPersonalityTriggerConditionValue(trigger, context) {
+  if (trigger.conditionType === "same_personality_count") return context.sources.length;
+  if (trigger.conditionType === "same_base_other_robot_count") {
+    return Math.max(0, context.robots.length - context.sources.length);
+  }
+  return context.robots.length;
+}
+
+function supportPersonalityTriggerTier(trigger, conditionValue) {
+  let matched = null;
+  trigger.tiers.forEach((tier) => {
+    if (conditionValue >= tier.minCount) matched = tier;
+  });
+  return matched;
+}
+
+function supportPersonalityTriggerResourceProperty(resource) {
+  if (resource === "energy") return "supportEnergy";
+  if (resource === "morale") return "supportMorale";
+  return "";
+}
+
+function supportPersonalityTriggerResourceMax(robot, resource) {
+  if (resource === "energy") return supportRobotMaxEnergy(robot);
+  if (resource === "morale") return supportRobotMaxMorale(robot);
+  return 0;
+}
+
+function supportPersonalityTriggerEligibleRobots(trigger, tier, robots) {
+  if (trigger.effectType !== "resource_delta") return robots;
+  const property = supportPersonalityTriggerResourceProperty(trigger.resource);
+  if (!property) return [];
+  return robots.filter((robot) => {
+    const current = Number(robot[property]) || 0;
+    const maximum = supportPersonalityTriggerResourceMax(robot, trigger.resource);
+    return tier.value < 0 ? current > SUPPORT_RESOURCE_EPSILON : current < maximum - SUPPORT_RESOURCE_EPSILON;
+  });
+}
+
+function supportPersonalityTriggerTargets(trigger, tier, context) {
+  let candidates = context.robots;
+  if (trigger.effectTarget === "source_all" || trigger.effectTarget === "random_source") {
+    candidates = context.sources;
+  } else if (trigger.effectTarget === "other_same_base" || trigger.effectTarget === "random_other_same_base") {
+    const sources = new Set(context.sources);
+    candidates = context.robots.filter((robot) => !sources.has(robot));
+  }
+  candidates = supportPersonalityTriggerEligibleRobots(trigger, tier, candidates);
+  const randomTarget = trigger.effectTarget.startsWith("random_");
+  if (!randomTarget) return candidates;
+  const shuffled = [...candidates];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled.slice(0, Math.min(shuffled.length, tier.targetCount));
+}
+
+function applySupportPersonalityTriggerEffect(trigger, tier, targets) {
+  if (trigger.effectType !== "resource_delta") return [];
+  const property = supportPersonalityTriggerResourceProperty(trigger.resource);
+  if (!property) return [];
+  return targets.filter((robot) => {
+    const current = Number(robot[property]) || 0;
+    const maximum = supportPersonalityTriggerResourceMax(robot, trigger.resource);
+    const next = Math.max(0, Math.min(maximum, current + tier.value));
+    if (Math.abs(next - current) <= SUPPORT_RESOURCE_EPSILON) return false;
+    robot[property] = next <= SUPPORT_RESOURCE_EPSILON ? 0 : next;
+    if (supportRobotResourcesDepleted(robot)) startSupportRobotForcedRecovery(robot);
+    return true;
+  });
+}
+
+function supportPersonalityTriggerMessage(template, context, targets) {
+  if (!template) return "";
+  return template
+    .replaceAll("{base}", context.base.name || "UNKNOWN BASE")
+    .replaceAll("{count}", String(context.robots.length))
+    .replaceAll("{targets}", targets.map((robot) => supportRobotDisplayName(robot)).join("・"));
+}
+
+function processSupportRobotPersonalityTriggers(timing) {
+  if (!state || !Array.isArray(ROBOT_PERSONALITY_TRIGGERS)) return [];
+  const day = Math.max(1, Math.floor(Number(state.day) || 1));
+  const runtime = ensureSupportPersonalityTriggerState();
+  const results = [];
+  ownedBases().forEach((base) => {
+    const robots = supportPersonalityTriggerRobots(base);
+    if (!robots.length) return;
+    ROBOT_PERSONALITY_TRIGGERS
+      .filter((trigger) => trigger.timing === timing && trigger.scope === "base")
+      .forEach((trigger) => {
+        const sources = robots.filter((robot) => supportRobotHasPersonality(robot, trigger.personalityId));
+        if (!sources.length) return;
+        const processKey = `${trigger.personalityId}:${trigger.id}:${base.id}`;
+        if (Number(runtime.lastProcessed[processKey]) === day) return;
+        runtime.lastProcessed[processKey] = day;
+        const context = { base, robots, sources };
+        const conditionValue = supportPersonalityTriggerConditionValue(trigger, context);
+        const tier = supportPersonalityTriggerTier(trigger, conditionValue);
+        if (!tier || tier.chance <= 0 || Math.random() >= tier.chance) return;
+        const targets = supportPersonalityTriggerTargets(trigger, tier, context);
+        const affected = applySupportPersonalityTriggerEffect(trigger, tier, targets);
+        if (!affected.length) return;
+        results.push({
+          triggerId: trigger.id,
+          baseId: base.id,
+          targets: affected.map((robot) => robot.id),
+          message: supportPersonalityTriggerMessage(tier.message, context, affected)
+        });
+      });
+  });
+  return results;
+}
+
+function supportRobotEfficiencyBreakdown(robot) {
+  ensureSupportRobotProfile(robot);
+  const maxMorale = SUPPORT_ROBOT_MAX_MORALE;
+  const morale = Math.max(0, Math.min(maxMorale, Number(robot.supportMorale) || 0));
+  const moraleRatio = maxMorale > 0 ? morale / maxMorale : 0;
+  const moraleEfficiency = SUPPORT_MORALE_MIN_EFFICIENCY
+    + (1 - SUPPORT_MORALE_MIN_EFFICIENCY) * moraleRatio;
+  const assignedTaskTypes = supportRobotAssignedTaskTypes(robot);
+  const selfBonus = supportRobotSelfEfficiencyBonus(robot, assignedTaskTypes.length);
+  const teamBonus = supportRobotTeamEfficiencyBonus(robot);
+  const baseSpeedModifier = Math.max(0.1, Number(supportRobotPersonality(robot).speedMod) || 1);
+  const personalityMultiplier = baseSpeedModifier * Math.max(0.1, 1 + selfBonus + teamBonus);
+  return {
+    assignedTaskTypes,
+    assignedTaskCount: assignedTaskTypes.length,
+    moraleEfficiency,
+    baseSpeedModifier,
+    selfBonus,
+    teamBonus,
+    personalityMultiplier,
+    totalEfficiency: moraleEfficiency * personalityMultiplier
+  };
 }
 
 function supportTaskGrade(device, task) {
@@ -3617,9 +4067,7 @@ function supportRobotRange(device) {
 }
 
 function supportRobotCooldownDays(device, task) {
-  const personality = supportRobotPersonality(device);
-  const speed = (Number(personality.speedMod) || 1)
-    * supportTaskMultiplier(device, task)
+  const speed = supportTaskMultiplier(device, task)
     * supportRobotMoraleEfficiency(device);
   return (SUPPORT_TASK_BASE_COOLDOWN[task] || 0.08) / Math.max(0.25, speed);
 }
@@ -3646,10 +4094,7 @@ function supportRobotMoraleEnergyRatio(device) {
 }
 
 function supportRobotMoraleEfficiency(robot) {
-  const maxMorale = SUPPORT_ROBOT_MAX_MORALE;
-  const morale = Math.max(0, Math.min(maxMorale, Number(robot?.supportMorale) || 0));
-  const ratio = maxMorale > 0 ? morale / maxMorale : 0;
-  return SUPPORT_MORALE_MIN_EFFICIENCY + (1 - SUPPORT_MORALE_MIN_EFFICIENCY) * ratio;
+  return supportRobotEfficiencyBreakdown(robot).totalEfficiency;
 }
 
 function supportRobotActionCostPlan(robot, task) {
@@ -4134,6 +4579,10 @@ function eventOffsetKey(entry, range, axis) {
 }
 
 function updateMarketEventOffsets(day = Number(state.day) || 1) {
+  if (state?.debugMode) {
+    state.marketEventOffsets = [];
+    return;
+  }
   ensureMarketEventOffsetsState();
   const offsets = new Map(state.marketEventOffsets.map((offset) => [offset.key, offset]));
   const activeKeys = new Set();
@@ -5127,7 +5576,7 @@ function isTabAvailable(tabId) {
   if (tabId === "shop") return Boolean(state.shopUnlocked);
   if (tabId === "schedule") return Boolean(state.shopUnlocked);
   if (tabId === "broker") return Boolean(state.brokerUnlocked);
-  if (tabId === "labor") return Boolean(state.debugMode) || supportRobotExists();
+  if (tabId === "labor") return Boolean(state.debugMode) || Boolean(state.automationTabUnlocked);
   return true;
 }
 
@@ -5156,7 +5605,7 @@ function updateTabIndicators() {
 function switchTab(tabId) {
   const previousTab = document.querySelector(".screen.active")?.id?.replace("-screen", "");
   if (!isTabAvailable(tabId)) {
-    toast("この機能を利用できるサポートロボットがありません。", "warning");
+    toast(tabId === "labor" ? "自動化OSの解放後に利用できます。" : "Action unavailable right now.", "warning");
     rejectFeedback();
     return;
   }
@@ -5194,7 +5643,10 @@ function switchTab(tabId) {
     triggerComms("schedule_opened");
   }
   if (tabId === "radio") renderRadio();
-  if (tabId === "labor") renderLabor();
+  if (tabId === "labor") {
+    renderLabor();
+    triggerComms("labor_first_open", { tabId: "labor" });
+  }
   if (tabId === "info") renderInfo();
   if (tabId === "farm" && (previousTab !== tabId || farmRenderIsRequested())) renderFarm();
   if (previousTab !== tabId) {
@@ -5337,7 +5789,7 @@ function hasQueuedStory(event) {
 }
 
 function triggerStoryEvent(trigger, context = {}) {
-  if (!state || state.ended) return false;
+  if (!state || state.ended || state.debugMode) return false;
   const events = STORY_EVENTS
     .filter((entry) => storyEventMatches(entry, trigger, context))
     .filter((event) => !hasQueuedStory(event));
@@ -5379,6 +5831,12 @@ function persistStoryState() {
 }
 
 function restoreStoryState() {
+  if (state?.debugMode) {
+    activeStory = null;
+    pendingStories = [];
+    state.storyOpen = [];
+    return;
+  }
   let sourceEntries = state.storyOpen || [];
   if (!sourceEntries.length) {
     sourceEntries = STORY_EVENTS
@@ -5469,12 +5927,37 @@ function renderStorySideStack(event, side, currentSpeakerId, context) {
   const ids = event.speakerSides?.[side] || [];
   const speakers = ids.map((id) => event.speakers?.[id]).filter(Boolean).sort((a, b) => (a.slot - b.slot) || a.id.localeCompare(b.id));
   stack.classList.toggle("hidden", !speakers.length);
+  if (!speakers.length) {
+    stack.textContent = "";
+    delete stack.dataset.renderKey;
+    return;
+  }
+
+  const renderKey = `${event.id}|${side}|${ids.join("|")}`;
+  if (stack.dataset.renderKey !== renderKey) {
+    stack.innerHTML = speakers.map((speaker) => storySpeakerCardMarkup(speaker, side, "", context, 0)).join("");
+    stack.dataset.renderKey = renderKey;
+  }
+
+  const cards = new Map(
+    [...stack.querySelectorAll(".story-side-card")].map((card) => [card.dataset.speakerId, card])
+  );
   let depth = 1;
-  stack.innerHTML = speakers.map((speaker) => {
-    const markup = storySpeakerCardMarkup(speaker, side, currentSpeakerId, context, speaker.id === currentSpeakerId ? 0 : depth);
-    if (speaker.id !== currentSpeakerId) depth += 1;
-    return markup;
-  }).join("");
+  speakers.forEach((speaker) => {
+    const card = cards.get(speaker.id);
+    if (!card) return;
+    const speaking = speaker.id === currentSpeakerId;
+    const stackDepth = speaking ? 0 : depth;
+    const x = side === "left" ? -14 * stackDepth : 14 * stackDepth;
+    card.classList.toggle("speaking", speaking);
+    card.classList.toggle("is-behind", !speaking);
+    card.style.setProperty("--story-card-x", `${x}px`);
+    card.style.setProperty("--story-card-y", `${10 * stackDepth}px`);
+    card.style.setProperty("--story-card-scale", String(Math.max(0.82, 1 - stackDepth * 0.045)));
+    card.style.setProperty("--story-card-opacity", speaking ? "1" : "0.92");
+    card.style.zIndex = String(speaking ? 20 : Math.max(1, 12 - stackDepth));
+    if (!speaking) depth += 1;
+  });
 }
 
 
@@ -5510,6 +5993,16 @@ function renderStoryComms() {
     if (overlay) {
       overlay.classList.add("hidden");
       overlay.setAttribute("aria-hidden", "true");
+    }
+    ["left", "right"].forEach((side) => {
+      const stack = document.getElementById(`story-${side}-stack`);
+      if (!stack) return;
+      stack.textContent = "";
+      delete stack.dataset.renderKey;
+    });
+    if (storyTextAnimationFrame) {
+      window.cancelAnimationFrame(storyTextAnimationFrame);
+      storyTextAnimationFrame = 0;
     }
     document.body.classList.remove("story-comms-active");
     renderStoryImagePopup(null);
@@ -5562,8 +6055,11 @@ function renderStoryComms() {
   textElement.textContent = formatCommsText(storyTextForPage(event, page), activeStory.context);
   textElement.classList.toggle("story-image-line", Boolean(imageLine));
   textElement.classList.remove("live");
-  void textElement.offsetWidth;
-  textElement.classList.add("live");
+  if (storyTextAnimationFrame) window.cancelAnimationFrame(storyTextAnimationFrame);
+  storyTextAnimationFrame = window.requestAnimationFrame(() => {
+    textElement.classList.add("live");
+    storyTextAnimationFrame = 0;
+  });
   document.getElementById("story-progress").textContent = pages.length > 1 ? `PACKET ${page + 1}/${pages.length}` : "";
   renderStorySideStack(event, "left", speaker, activeStory.context);
   renderStorySideStack(event, "right", speaker, activeStory.context);
@@ -5638,7 +6134,7 @@ function clearStoryForTrigger(trigger) {
 }
 
 function triggerComms(trigger, context = {}, options = {}) {
-  if (!state || state.ended) return;
+  if (!state || state.ended || state.debugMode) return false;
   if (!options.skipStory && triggerStoryEvent(trigger, context)) return;
   const events = COMM_EVENTS
     .filter((entry) => commsEventMatches(entry, trigger, context))
@@ -5677,6 +6173,12 @@ function persistCommsState() {
 }
 
 function restoreCommsState() {
+  if (state?.debugMode) {
+    activeComms = null;
+    pendingComms = [];
+    state.commsOpen = [];
+    return;
+  }
   let sourceEntries = state.commsOpen || [];
   if (!sourceEntries.length) {
     sourceEntries = COMM_EVENTS
@@ -5712,6 +6214,7 @@ function isCommsBlocking() {
 function isRadarSimulationRunning() {
   return Boolean(
     state
+    && !state.debugMode
     && state.timeUnlocked
     && !state.paused
     && !state.ended
@@ -8371,6 +8874,7 @@ function processSupportRobots(deltaDays) {
   ensureSupportAutomationState();
   if (!state.timeUnlocked || state.ended || state.paused) return;
   let acted = false;
+  const scanNow = typeof performance !== "undefined" ? performance.now() : Date.now();
   const markActed = (base) => {
     acted = true;
     requestFarmRender(base);
@@ -8381,7 +8885,6 @@ function processSupportRobots(deltaDays) {
       .forEach((robot) => {
         ensureSupportRobotProfile(robot);
         const cooldownTick = tickSupportRobotCooldowns(robot, deltaDays);
-        robot.supportBlueprint = normalizeSupportBlueprint(robot.supportBlueprint);
 
         if (!supportRobotIsCharging(robot) && supportRobotResourcesDepleted(robot)) {
           if (startSupportRobotForcedRecovery(robot)) markActed(base);
@@ -8407,11 +8910,15 @@ function processSupportRobots(deltaDays) {
           }
         }
 
+        const nextIdleScanAt = supportRobotNextIdleScanAt.get(robot) || 0;
+        if (!chargeContinuation && scanNow < nextIdleScanAt) return;
+
         const blueprintResult = runSupportBlueprint(base, robot, chargeContinuation ? {
           startNodeId: chargeContinuation.to,
           completedNodeId: cooldownTick.chargeNodeId
         } : undefined);
         if (blueprintResult.acted) {
+          supportRobotNextIdleScanAt.delete(robot);
           markActed(base);
           return;
         }
@@ -8422,8 +8929,11 @@ function processSupportRobots(deltaDays) {
           && supportProcurementTargetExists();
         if (canProcure && supportRobotTaskReady(robot, "procure") && buySeedsByRobot()) {
           spendSupportRobotAction(robot, "procure");
+          supportRobotNextIdleScanAt.delete(robot);
           markActed(base);
+          return;
         }
+        supportRobotNextIdleScanAt.set(robot, scanNow + SUPPORT_ROBOT_IDLE_SCAN_MS);
       });
   });
   const laborActive = document.getElementById("labor-screen")?.classList.contains("active");
@@ -8489,8 +8999,18 @@ function supportRobotPlantingPanel(device) {
 function showSupportRobotPanel(device) {
   ensureSupportRobotProfile(device);
   const skill = supportRobotSkill(device);
-  const personality = supportRobotPersonality(device);
-  const html = `<div class="device-detail support-automation-panel"><img src="${FLOOR_DEVICES.support_robot?.sprite || FLOOR_DEVICES.support_robot?.icon}" alt=""><div><h3>${escapeHtml(FLOOR_DEVICES.support_robot?.name || "Support Robot")}</h3><p>特技: ${escapeHtml(skill.name || device.robotSkillId)} // 収穫${supportTaskGrade(device, "harvest")} 植付${supportTaskGrade(device, "plant")} 清掃${supportTaskGrade(device, "cleaning")} 調達${supportTaskGrade(device, "procure")} 出荷${supportTaskGrade(device, "ship")}</p><p>性格: ${escapeHtml(personality.name || device.robotPersonalityId)} // 範囲 ${supportRobotRange(device)} / 電力 ${Math.round(Number(device.supportEnergy) || 0)} / 気力 ${Math.round(Number(device.supportMorale) || 0)} / 効率 ${Math.round(supportRobotMoraleEfficiency(device) * 100)}%</p><p>OS: 収穫 ${state.supportOS.harvest ? "ONLINE" : "LOCKED"} / 植付 ${state.supportOS.planting ? "ONLINE" : "LOCKED"} / 清掃 ${state.supportOS.cleaning ? "ONLINE" : "LOCKED"}</p></div></div>${supportRobotHarvestPanel(device)}${supportRobotPlantingPanel(device)}`;
+  const personalities = supportRobotPersonalities(device);
+  const rarity = supportRobotPersonalityRarity(device);
+  const personalityNames = personalities.map((entry) => entry.name).join(" / ") || "未設定";
+  const personalityDescriptions = personalities
+    .map((entry) => `${escapeHtml(entry.name)}: ${escapeHtml(entry.description || "説明未設定")}`)
+    .join("<br>");
+  const efficiency = supportRobotEfficiencyBreakdown(device);
+  const percentLabel = (value) => {
+    const percent = Math.round((Number(value) || 0) * 1000) / 10;
+    return `${percent >= 0 ? "+" : ""}${percent}%`;
+  };
+  const html = `<div class="device-detail support-automation-panel"><img src="${FLOOR_DEVICES.support_robot?.sprite || FLOOR_DEVICES.support_robot?.icon}" alt=""><div><h3>${escapeHtml(FLOOR_DEVICES.support_robot?.name || "Support Robot")}</h3><p>特技: ${escapeHtml(skill.name || device.robotSkillId)} // 収穫${supportTaskGrade(device, "harvest")} 植付${supportTaskGrade(device, "plant")} 清掃${supportTaskGrade(device, "cleaning")} 調達${supportTaskGrade(device, "procure")} 出荷${supportTaskGrade(device, "ship")}</p><p>性格タグ: [${escapeHtml(rarity.name)}] ${escapeHtml(personalityNames)}</p><p>${personalityDescriptions || "性格特性の説明は未設定です。"}</p><p>担当作業 ${efficiency.assignedTaskCount}種類 / 個体補正 ${percentLabel(efficiency.selfBonus)} / 同拠点補正 ${percentLabel(efficiency.teamBonus)}</p><p>範囲 ${supportRobotRange(device)} / 電力 ${Math.round(Number(device.supportEnergy) || 0)} / 気力 ${Math.round(Number(device.supportMorale) || 0)} / 共通効率 ${Math.round(efficiency.totalEfficiency * 100)}%</p><p>OS: 収穫 ${state.supportOS.harvest ? "ONLINE" : "LOCKED"} / 植付 ${state.supportOS.planting ? "ONLINE" : "LOCKED"} / 清掃 ${state.supportOS.cleaning ? "ONLINE" : "LOCKED"}</p></div></div>${supportRobotHarvestPanel(device)}${supportRobotPlantingPanel(device)}`;
   showModal("SUPPORT ROBOT", "支援ロボット個体情報", html, true, false, "閉じる");
 }
 function cropChoiceButtons(actionPrefix, selectedCropId, { seedLocked = false } = {}) {
@@ -8667,9 +9187,13 @@ function processDayBoundary() {
     state.paused = true;
     showEndReport();
   } else {
+    const personalityTriggerResults = processSupportRobotPersonalityTriggers("day_start");
     updateMarketForDay({ drift: true });
     setStatus(`DAY ${state.day} 開始：維持費 ₡${upkeep}を支払いました。`);
     toast(`DAY ${String(state.day).padStart(2, "0")} 開始`);
+    personalityTriggerResults.forEach((result) => {
+      if (result.message) toast(result.message, "bot");
+    });
     if (state.mode === "normal" && state.day > 30 && !state.prototypeReportShown) {
       state.prototypeReportShown = true;
       setStatus("30 day evaluation complete. Endless mode begins.");
@@ -8689,7 +9213,8 @@ function realtimeTick() {
   const dayProgressValue = Number(state.dayProgress);
   state.dayProgress = Number.isFinite(dayProgressValue) ? Math.max(0, dayProgressValue) : 0;
   if (state.dayProgress > 3) state.dayProgress %= 1;
-  if (startScreenOpen || isCommsBlocking()) {
+  if (isCommsBlocking()) return;
+  if (startScreenOpen) {
     if (now - lastRenderAt >= 500) {
       renderRuntime();
       lastRenderAt = now;
@@ -9873,6 +10398,7 @@ function closeStartScreen() {
     clearCommsForTrigger("game_start");
   }
   if (isFreshOperationState() || activeComms) triggerComms("game_start");
+  if (!state.debugMode) updateProgressionUnlocks();
   triggerPendingRadarUnlockConversation();
 }
 

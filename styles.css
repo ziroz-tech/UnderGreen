@@ -7555,6 +7555,7 @@ html.apple-touch-device .start-records {
   background: rgba(1, 5, 4, .86);
   color: var(--text);
   isolation: isolate;
+  contain: layout paint;
 }
 
 .story-comms-overlay.hidden {
@@ -7563,7 +7564,7 @@ html.apple-touch-device .start-records {
 
 .story-comms-active #app,
 .story-comms-active .action-dock {
-  filter: grayscale(.9) brightness(.38) blur(1.5px);
+  opacity: .34;
   pointer-events: none;
 }
 
@@ -7583,14 +7584,12 @@ html.apple-touch-device .start-records {
     radial-gradient(circle at 50% 48%, rgba(72, 219, 234, .12), transparent 38%);
   background-size: cover;
   background-position: center;
-  filter: saturate(.9) brightness(.55) blur(1.5px);
-  transform: scale(1.04);
+  opacity: .72;
 }
 
 .story-comms-noise {
   z-index: 1;
-  opacity: .15;
-  mix-blend-mode: screen;
+  opacity: .08;
   background:
     repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 5px),
     repeating-linear-gradient(90deg, transparent 0 9px, rgba(113,255,184,.08) 10px),
@@ -7606,16 +7605,15 @@ html.apple-touch-device .start-records {
     linear-gradient(90deg, rgba(113,255,184,.14) 1px, transparent 1px);
   background-size: 42px 42px;
   mask-image: radial-gradient(circle at 50% 50%, #000 0 46%, transparent 78%);
-  animation: storyGridDrift 12s linear infinite;
+  animation: none;
 }
 
 .story-comms-sweep {
   z-index: 5;
-  opacity: .55;
+  opacity: .32;
   background: linear-gradient(180deg, transparent, rgba(113,255,184,.18), rgba(245,214,91,.12), transparent);
   transform: translateY(-120%);
-  animation: storySweep 3.8s ease-in-out infinite;
-  mix-blend-mode: screen;
+  animation: storySweep 6s ease-in-out infinite;
 }
 
 .story-comms-window {
@@ -7731,15 +7729,14 @@ html.apple-touch-device .start-records {
   position: absolute;
   inset: 0;
   background: repeating-linear-gradient(0deg, transparent 0 4px, rgba(255,255,255,.07) 5px);
-  mix-blend-mode: screen;
-  opacity: .32;
+  opacity: .24;
 }
 
 .story-side img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: saturate(.95) contrast(1.08) brightness(.82);
+  filter: none;
 }
 
 .story-side small,
@@ -7770,7 +7767,7 @@ html.apple-touch-device .start-records {
   justify-content: center;
   padding: 8px 4px;
   text-align: left;
-  animation: storyTextPulse 2.8s ease-in-out infinite;
+  animation: none;
 }
 
 .story-kicker {
@@ -7925,18 +7922,16 @@ html.apple-touch-device .start-records {
 
 
 .story-side {
-  transition: transform .22s ease, opacity .22s ease, filter .22s ease, box-shadow .22s ease, border-color .22s ease;
+  transition: transform .22s ease, opacity .22s ease, box-shadow .22s ease, border-color .22s ease;
 }
 
 .story-side:not(.speaking) {
   opacity: .64;
-  filter: grayscale(.35) brightness(.72);
   transform: scale(.975);
 }
 
 .story-side.speaking {
   opacity: 1;
-  filter: saturate(1.12) contrast(1.08) brightness(1.04);
   transform: translateY(-10px) scale(1.035);
   border-color: var(--yellow);
   box-shadow: inset 0 0 32px rgba(245,214,91,.12), 0 0 46px rgba(245,214,91,.22);
@@ -7957,7 +7952,7 @@ html.apple-touch-device .start-records {
 }
 
 .story-side.speaking .story-side-frame {
-  animation: storySpeakerPulse 1.25s ease-in-out infinite;
+  animation: none;
 }
 
 .story-history {
@@ -8387,11 +8382,11 @@ html.apple-touch-device .start-records {
   transform: translate(var(--story-card-x, 0), var(--story-card-y, 0)) scale(var(--story-card-scale, 1));
   opacity: var(--story-card-opacity, 1);
   background: rgba(2, 12, 10, .94);
-  transition: transform .24s cubic-bezier(.2,.8,.2,1), opacity .24s ease, filter .24s ease, box-shadow .24s ease, border-color .24s ease;
+  transition: transform .24s cubic-bezier(.2,.8,.2,1), opacity .24s ease, box-shadow .24s ease, border-color .24s ease;
 }
 
 .story-side-stack > .story-side:not(.speaking) {
-  filter: grayscale(.22) brightness(.88) saturate(.94);
+  opacity: .82;
 }
 
 .story-side-stack > .story-side.is-behind {
@@ -8411,7 +8406,6 @@ html.apple-touch-device .start-records {
 
 .story-side-stack > .story-side.speaking {
   opacity: 1;
-  filter: saturate(1.12) contrast(1.08) brightness(1.05);
   transform: translateY(-12px) scale(1.035);
 }
 
@@ -9229,7 +9223,7 @@ html.apple-touch-device .ios-input-diagnostic pre {
   gap: 7px;
 }
 
-.labor-profile-grid div {
+.labor-profile-grid > div {
   padding: 8px;
   border: 1px solid rgba(117, 150, 137, 0.2);
   background: rgba(0, 0, 0, 0.18);
@@ -9255,6 +9249,175 @@ html.apple-touch-device .ios-input-diagnostic pre {
 
 .labor-profile-grid .wide {
   grid-column: 1 / -1;
+}
+
+.labor-personality-profile {
+  display: grid;
+  gap: 8px;
+}
+
+.labor-personality-head,
+.labor-robot-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.labor-robot-card-heading strong {
+  flex: 1;
+}
+
+.labor-rarity-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 6px;
+  border: 1px solid var(--personality-rarity-color, #79a58f);
+  border-radius: 2px;
+  color: var(--personality-rarity-color, #79a58f);
+  background: rgba(121, 165, 143, 0.1);
+  background: color-mix(in srgb, var(--personality-rarity-color, #79a58f) 12%, transparent);
+  font: 800 8px/1 Consolas, monospace;
+  letter-spacing: 0;
+}
+
+.labor-rarity-badge.compact {
+  min-height: 16px;
+  padding: 2px 4px;
+  font-size: 7px;
+}
+
+.labor-personality-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.labor-personality-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid rgba(113, 255, 184, 0.38);
+  border-radius: 3px;
+  color: var(--green-bright);
+  background: rgba(26, 91, 64, 0.2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: help;
+}
+
+.labor-personality-tag:hover,
+.labor-personality-tag:focus-visible {
+  border-color: var(--green-bright);
+  outline: none;
+  background: rgba(54, 150, 105, 0.24);
+}
+
+.labor-current-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(113, 255, 184, 0.22);
+}
+
+.labor-current-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.labor-current-head span,
+.labor-current-head small,
+.labor-current-head strong {
+  display: block;
+  letter-spacing: 0;
+}
+
+.labor-current-head small {
+  color: var(--muted);
+  font: 700 8px Consolas, monospace;
+}
+
+.labor-current-head strong {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.labor-current-head > b {
+  color: var(--green-bright);
+  font: 800 11px Consolas, monospace;
+  letter-spacing: 0;
+}
+
+.labor-assignment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 25px;
+}
+
+.labor-assignment-chip,
+.labor-assignment-empty {
+  padding: 4px 6px;
+  border: 1px solid rgba(113, 255, 184, 0.28);
+  border-radius: 2px;
+  color: var(--green-bright);
+  background: rgba(7, 35, 24, 0.66);
+  font: 700 9px "Noto Sans JP", sans-serif;
+  letter-spacing: 0;
+}
+
+.labor-assignment-empty {
+  color: var(--muted);
+  border-style: dashed;
+  background: transparent;
+}
+
+.labor-efficiency-section .labor-efficiency-total {
+  color: var(--yellow);
+  font-size: 15px;
+}
+
+.labor-efficiency-breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  border: 1px solid rgba(117, 150, 137, 0.2);
+  background: rgba(117, 150, 137, 0.16);
+}
+
+.labor-efficiency-breakdown div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 7px;
+  background: rgba(0, 9, 6, 0.88);
+}
+
+.labor-efficiency-breakdown dt,
+.labor-efficiency-breakdown dd {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.labor-efficiency-breakdown dt {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.labor-efficiency-breakdown dd {
+  color: var(--text);
+  font: 800 10px Consolas, monospace;
 }
 
 .blueprint-console {
@@ -9401,38 +9564,6 @@ html.apple-touch-device .ios-input-diagnostic pre {
 .blueprint-package-card:disabled small {
   color: rgba(255, 118, 94, 0.52);
 }
-.blueprint-library-mode {
-  display: inline-grid;
-  grid-template-columns: repeat(2, minmax(74px, 1fr));
-  min-height: 34px;
-  border: 1px solid var(--line-strong);
-  background: rgba(1, 10, 7, 0.76);
-}
-
-.blueprint-library-mode button {
-  min-width: 0;
-  padding: 7px 10px;
-  border: 0;
-  color: var(--muted);
-  background: transparent;
-  font: 700 10px Consolas, monospace;
-  letter-spacing: 0;
-  cursor: pointer;
-}
-
-.blueprint-library-mode button + button {
-  border-left: 1px solid var(--line-strong);
-}
-
-.blueprint-library-mode button.active {
-  color: #02130d;
-  background: var(--green-bright);
-}
-
-.blueprint-library-mode button:focus-visible {
-  outline: 2px solid var(--yellow);
-  outline-offset: 2px;
-}
 .labor-tooltip-toggle {
   position: relative;
   display: inline-flex;
@@ -9504,12 +9635,14 @@ html.apple-touch-device .ios-input-diagnostic pre {
   grid-template-columns: minmax(0, 1fr) 190px;
   min-width: 0;
   min-height: 570px;
+  height: clamp(570px, calc(100vh - 190px), 760px);
 }
 
 .labor-blueprint-editor {
   position: relative;
   min-width: 0;
   min-height: 570px;
+  height: 100%;
   overflow: hidden;
   touch-action: none;
   cursor: grab;
@@ -9856,18 +9989,103 @@ html.apple-touch-device .ios-input-diagnostic pre {
 .blueprint-palette-panel {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
 .blueprint-node-palette {
+  flex: 1 1 auto;
   min-height: 0;
   padding-right: 4px;
   overflow-y: auto;
   align-content: start;
 }
 
+.blueprint-palette-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  padding: 7px 7px 0;
+  margin: 0 0 10px;
+  border-bottom: 1px solid rgba(99, 240, 183, 0.48);
+  background: rgba(5, 19, 14, 0.98);
+}
+
+.blueprint-palette-tabs button {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 39px;
+  padding: 7px 8px 5px;
+  border: 1px solid rgba(99, 240, 183, 0.38);
+  border-bottom-color: rgba(99, 240, 183, 0.22);
+  background: #17372c;
+  color: rgba(220, 244, 234, 0.78);
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%);
+  box-shadow: inset 0 3px 0 rgba(99, 240, 183, 0.2);
+  transform: translateY(1px);
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.blueprint-palette-tabs button:nth-child(2) {
+  border-color: rgba(234, 203, 87, 0.42);
+  border-bottom-color: rgba(234, 203, 87, 0.22);
+  background: #34351d;
+  box-shadow: inset 0 3px 0 rgba(234, 203, 87, 0.22);
+}
+
+.blueprint-palette-tabs button:nth-child(3) {
+  border-color: rgba(161, 137, 210, 0.42);
+  border-bottom-color: rgba(161, 137, 210, 0.22);
+  background: #2d2839;
+  box-shadow: inset 0 3px 0 rgba(161, 137, 210, 0.22);
+}
+
+.blueprint-palette-tabs button span,
+.blueprint-palette-tabs button small {
+  display: block;
+  pointer-events: none;
+}
+
+.blueprint-palette-tabs button span {
+  font: 800 11px/1.1 "Noto Sans JP", sans-serif;
+}
+
+.blueprint-palette-tabs button small {
+  margin-top: 3px;
+  color: currentColor;
+  font: 700 8px/1 Consolas, monospace;
+  opacity: 0.68;
+}
+
+.blueprint-palette-tabs button:hover,
+.blueprint-palette-tabs button:focus-visible {
+  color: #ffffff;
+  filter: brightness(1.16);
+}
+
+.blueprint-palette-tabs button:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.blueprint-palette-tabs button.active {
+  min-height: 44px;
+  border-color: var(--accent);
+  border-bottom-color: #204b3b;
+  background: #204b3b;
+  color: #ffffff;
+  box-shadow: inset 0 3px 0 var(--accent), 0 -3px 10px rgba(99, 240, 183, 0.12);
+  filter: none;
+}
 .blueprint-palette-group {
   display: grid;
+  grid-column: 1 / -1;
   gap: 6px;
   padding-bottom: 10px;
   border-bottom: 1px solid rgba(117, 150, 137, 0.16);
@@ -10135,13 +10353,16 @@ html.apple-touch-device .ios-input-diagnostic pre {
   }
   .blueprint-workbench {
     grid-template-columns: 1fr;
+    height: auto;
   }
 
   .labor-blueprint-editor {
+    height: 500px;
     min-height: 500px;
   }
 
   .blueprint-palette-panel {
+    max-height: 580px;
     border-width: 1px 0 0;
   }
 
@@ -10158,7 +10379,6 @@ html.apple-touch-device .ios-input-diagnostic pre {
 
   .blueprint-toolbar-actions,
   .blueprint-toolbar-actions > button,
-  .blueprint-library-mode,
   .labor-tooltip-toggle {
     width: 100%;
   }

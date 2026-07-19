@@ -22,11 +22,13 @@
     summary: { title: "WORKFORCE TOTAL", body: "所有している全サポートロボットの台数と、現在の電力・気力の合計です。" },
     unitName: { title: "UNIT NAME", body: "このロボットの表示名です。初期支給機以外は24文字まで変更でき、拠点名と合わせて個体識別に使われます。" },
     energy: { title: "電力", body: "作業時に最初に消費する基本資源です。残量がある間は通常効率で働き、尽きると気力を使って作業を続けます。" },
-    morale: { title: "気力 / 業務効率", body: "電力が尽きた後の作業継続に使います。気力が減るほど業務効率が落ち、電力と気力の両方を使い切ると1日かけた強制休養に入ります。" },
+    morale: { title: "気力", body: "電力が尽きた後の作業継続に使います。電力と気力の両方を使い切ると1日かけた強制休養に入ります。" },
     location: { title: "LOCATION", body: "このロボットを配置している拠点とグリッド座標です。ブループリントは個体ごとに保存されます。" },
     range: { title: "RANGE", body: "収穫・播種・清掃で届く作業範囲です。対象設備が範囲外にある場合、そのタスクは実行できません。" },
     trait: { title: "TRAIT", body: "この個体の作業特性です。得意な業務のスキル等級や消費資源などに影響します。" },
-    personality: { title: "PERSONALITY", body: "この個体の性格です。電力・気力・業務効率などの個体差に関係します。" },
+    personality: { title: "PERSONALITY // {name}", body: "{description}" },
+    assignmentStatus: { title: "担当作業", body: "開始ノードから接続され、実際に到達できるタスクの種類を表示します。未接続ノードと充電休憩は含みません。" },
+    efficiencyStatus: { title: "効率補正", body: "固有速度、担当構成による個体補正、同拠点支援、現在の気力倍率を合成した実際の作業効率です。" },
     status: { title: "ROBOT STATUS", body: "READY、クールタイム、充電休憩、強制休養など、現在の稼働状態を表示します。クールタイムはロボット個体に属し、タスクごとの値ではありません。" },
     center: { title: "CENTER", body: "配置済みノード全体が編集領域に収まるよう、表示位置とズームを中央へ戻します。ノード配置そのものは変わりません。" },
     packageToggle: { title: "NODE PACKAGE", body: "登録済みのノード構成を開閉します。パッケージは既存の構成を残したまま、独立したノード群として追加されます。" },
@@ -148,7 +150,7 @@
 
   let laborPaletteDrag = null;
   let laborPaletteSuppressClickUntil = 0;
-  let laborBlueprintLibraryMode = "simple";
+  let laborBlueprintPaletteGroup = "TASK";
   const LABOR_TOOLTIP_PREFERENCE_KEY = "undergreen.laborTooltips";
   let laborTooltipsEnabled = (() => {
     try {
@@ -514,8 +516,6 @@
     setLaborTooltipData(document.querySelector("[data-blueprint-package-toggle]"), "packageToggle");
 
     setLaborTooltipData(document.querySelector(".labor-tooltip-toggle"), "tooltipToggle");
-    setLaborTooltipData(document.querySelector('[data-blueprint-library-mode="simple"]'), "simple");
-    setLaborTooltipData(document.querySelector('[data-blueprint-library-mode="advanced"]'), "advanced");
     setLaborTooltipData(document.getElementById("labor-blueprint-editor"), "editor", { focusable: true });
     setLaborTooltipData(document.querySelector(".blueprint-palette-panel"), "library", { focusable: true });
   }
@@ -853,7 +853,6 @@
       selectedLaborRobotId = record.robot.id;
     }
     ensureSupportRobotProfile(record.robot);
-    record.robot.supportBlueprint = normalizeSupportBlueprint(record.robot.supportBlueprint);
     return record;
   }
 
@@ -1302,6 +1301,28 @@
     return cooldown > 0 ? `${cooldown.toFixed(2)} DAY` : "READY";
   }
 
+  function laborPercent(value, signed = false) {
+    const rounded = Math.round((Number(value) || 0) * 1000) / 10;
+    const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    return `${signed && rounded > 0 ? "+" : ""}${text}%`;
+  }
+
+  function laborAssignedTaskMarkup(taskTypes) {
+    if (!taskTypes.length) return `<span class="labor-assignment-empty">担当なし</span>`;
+    return taskTypes.map((taskType) => {
+      const definition = LABOR_NODE_DEFINITIONS[taskType];
+      return `<span class="labor-assignment-chip">${escapeHtml(definition?.label || taskType)}</span>`;
+    }).join("");
+  }
+
+  function laborPersonalityTagMarkup(robot) {
+    const personalityIds = supportRobotPersonalityIds(robot);
+    const personalities = supportRobotPersonalities(robot);
+    return personalities.map((personality, index) => `<span class="labor-personality-tag" ${laborTooltipAttributes(laborItemTooltip("personality", {
+      name: personality.name || personalityIds[index],
+      description: personality.description || "性格特性の説明は未設定です。"
+    }))} tabindex="0">${escapeHtml(personality.name || personalityIds[index])}</span>`).join("");
+  }
   function renderLaborRobotDetail(record) {
     const detail = document.getElementById("labor-robot-detail");
     if (!detail) return;
@@ -1314,9 +1335,9 @@
     const maxMorale = supportRobotMaxMorale(robot);
     const energy = Math.max(0, Math.min(maxEnergy, Number(robot.supportEnergy) || 0));
     const morale = Math.max(0, Math.min(maxMorale, Number(robot.supportMorale) || 0));
-    const efficiency = Math.round(supportRobotMoraleEfficiency(robot) * 100);
+    const efficiencyBreakdown = supportRobotEfficiencyBreakdown(robot);
     const skill = supportRobotSkill(robot);
-    const personality = supportRobotPersonality(robot);
+    const personalityRarity = supportRobotPersonalityRarity(robot);
     detail.innerHTML = `
       <label class="labor-name-field" ${laborTooltipAttributes("unitName")}>
         <span>UNIT NAME ${robot.isInitialSupportRobot ? "// INITIAL UNIT" : "// EDITABLE"}</span>
@@ -1327,16 +1348,38 @@
         <div class="labor-stat-track"><i data-labor-energy-bar style="width:${maxEnergy ? energy / maxEnergy * 100 : 0}%"></i></div>
       </div>
       <div class="labor-stat morale" ${laborTooltipAttributes("morale")} tabindex="0">
-        <div class="labor-stat-head"><span>気力 / 業務効率</span><strong data-labor-morale-value>${Math.round(morale)} / ${Math.round(maxMorale)} · ${efficiency}%</strong></div>
+        <div class="labor-stat-head"><span>気力</span><strong data-labor-morale-value>${Math.round(morale)} / ${Math.round(maxMorale)}</strong></div>
         <div class="labor-stat-track"><i data-labor-morale-bar style="width:${maxMorale ? morale / maxMorale * 100 : 0}%"></i></div>
       </div>
       <div class="labor-profile-grid">
         <div ${laborTooltipAttributes("location")} tabindex="0"><small>LOCATION</small><strong>${escapeHtml(supportRobotLocationLabel(base, robot))}</strong></div>
         <div ${laborTooltipAttributes("range")} tabindex="0"><small>RANGE</small><strong>${escapeHtml(supportRobotRange(robot))} GRID</strong></div>
         <div ${laborTooltipAttributes("trait")} tabindex="0"><small>TRAIT</small><strong>${escapeHtml(skill.name || robot.robotSkillId)}</strong></div>
-        <div ${laborTooltipAttributes("personality")} tabindex="0"><small>PERSONALITY</small><strong>${escapeHtml(personality.name || robot.robotPersonalityId)}</strong></div>
+        <div class="labor-personality-profile wide">
+          <span class="labor-personality-head"><small>PERSONALITY TAGS</small><b class="labor-rarity-badge" style="--personality-rarity-color:${escapeHtml(personalityRarity.color)}">${escapeHtml(personalityRarity.name)}</b></span>
+          <div class="labor-personality-tags">${laborPersonalityTagMarkup(robot)}</div>
+        </div>
         <div class="wide" ${laborTooltipAttributes("status")} tabindex="0"><small>ROBOT STATUS</small><strong data-labor-cooldown-value>${laborRobotStatusText(robot)}</strong></div>
-      </div>`;
+      </div>
+      <section class="labor-current-section" ${laborTooltipAttributes("assignmentStatus")} tabindex="0">
+        <header class="labor-current-head">
+          <span><small>CURRENT ASSIGNMENT</small><strong>担当作業</strong></span>
+          <b data-labor-assignment-count>${efficiencyBreakdown.assignedTaskCount}種類</b>
+        </header>
+        <div class="labor-assignment-list" data-labor-assignment-list>${laborAssignedTaskMarkup(efficiencyBreakdown.assignedTaskTypes)}</div>
+      </section>
+      <section class="labor-current-section labor-efficiency-section" ${laborTooltipAttributes("efficiencyStatus")} tabindex="0">
+        <header class="labor-current-head">
+          <span><small>EFFICIENCY BREAKDOWN</small><strong>効率補正</strong></span>
+          <b class="labor-efficiency-total" data-labor-efficiency-total>${laborPercent(efficiencyBreakdown.totalEfficiency)}</b>
+        </header>
+        <dl class="labor-efficiency-breakdown">
+          <div><dt>固有速度</dt><dd data-labor-efficiency-speed>${laborPercent(efficiencyBreakdown.baseSpeedModifier - 1, true)}</dd></div>
+          <div><dt>担当構成</dt><dd data-labor-efficiency-self>${laborPercent(efficiencyBreakdown.selfBonus, true)}</dd></div>
+          <div><dt>同拠点支援</dt><dd data-labor-efficiency-team>${laborPercent(efficiencyBreakdown.teamBonus, true)}</dd></div>
+          <div><dt>気力倍率</dt><dd data-labor-efficiency-morale>${laborPercent(efficiencyBreakdown.moraleEfficiency)}</dd></div>
+        </dl>
+      </section>`;
   }
 
   function resizeLaborBlueprintWorld(nodes) {
@@ -1356,22 +1399,14 @@
     }
   }
 
-  function updateLaborBlueprintLibraryModeControls() {
-    document.querySelectorAll("[data-blueprint-library-mode]").forEach((button) => {
-      const active = button.dataset.blueprintLibraryMode === laborBlueprintLibraryMode;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", String(active));
-    });
-  }
-
-  function renderLaborBlueprint() {
+  function renderLaborBlueprint(refreshRobotDetail = true) {
     const nodesHost = document.getElementById("labor-blueprint-nodes");
     const palette = document.getElementById("blueprint-node-palette");
     const label = document.getElementById("blueprint-robot-label");
     const emptyHint = document.getElementById("blueprint-empty-hint");
     const record = selectedLaborRobotRecord();
     if (!nodesHost || !palette || !label) return;
-    updateLaborBlueprintLibraryModeControls();
+    if (refreshRobotDetail) renderLaborRobotDetail(record);
     renderLaborBlueprintPackageCards(record);
     if (!record) {
       label.textContent = "NO UNIT";
@@ -1389,10 +1424,20 @@
     nodesHost.innerHTML = blueprint.nodes.map((node) => (
       supportBlueprintNodeMarkup(node, robot, blueprint)
     )).join("");
-    const paletteGroups = laborBlueprintLibraryMode === "advanced"
-      ? LABOR_PALETTE_GROUPS
-      : LABOR_PALETTE_GROUPS.filter((group) => group.label === "TASK");
-    palette.innerHTML = paletteGroups.map((group) => {
+    const availablePaletteGroups = LABOR_PALETTE_GROUPS;
+    if (!availablePaletteGroups.some((group) => group.label === laborBlueprintPaletteGroup)) {
+      laborBlueprintPaletteGroup = "TASK";
+    }
+    const paletteGroups = availablePaletteGroups.filter((group) => group.label === laborBlueprintPaletteGroup);
+    const categoryTabs = `<div class="blueprint-palette-tabs" role="tablist" aria-label="ノードの種類">
+      ${availablePaletteGroups.map((group) => {
+        const active = group.label === laborBlueprintPaletteGroup;
+        const tabLabel = group.label === "FLOW CONTROL" ? "制御" : group.label === "CONDITION" ? "条件" : "作業";
+        const tabCode = group.label === "FLOW CONTROL" ? "FLOW" : group.label === "CONDITION" ? "COND" : "TASK";
+        return `<button class="${active ? "active" : ""}" data-blueprint-palette-group="${escapeHtml(group.label)}" role="tab" type="button" title="${tabLabel}ノード" aria-label="${tabLabel}ノード" aria-selected="${active}"><span>${tabLabel}</span><small>${tabCode}</small></button>`;
+      }).join("")}
+    </div>`;
+    palette.innerHTML = categoryTabs + paletteGroups.map((group) => {
       const buttons = group.types.map((type) => {
         const definition = supportBlueprintNodeDefinition(type);
         const unlock = supportBlueprintNodeUnlockState(type);
@@ -1415,6 +1460,10 @@
     });
   }
 
+  function laborRobotRarityMarkup(robot) {
+    const rarity = supportRobotPersonalityRarity(robot);
+    return `<b class="labor-rarity-badge compact" style="--personality-rarity-color:${escapeHtml(rarity.color)}">${escapeHtml(rarity.name)}</b>`;
+  }
   function renderLabor() {
     const summary = document.getElementById("labor-summary");
     const list = document.getElementById("labor-robot-list");
@@ -1431,11 +1480,11 @@
         body: "この個体を選択し、配置拠点・電力・気力・特性と、個体専用のブループリントを表示します."
       }, { robotName: supportRobotDisplayName(robot) }))} type="button">
         <img src="${escapeHtml(sprite)}" alt="">
-        <span><strong>${escapeHtml(supportRobotDisplayName(robot))}</strong><small>${escapeHtml(supportRobotLocationLabel(base, robot))}<br>電力 ${Math.round(Number(robot.supportEnergy) || 0)} / 気力 ${Math.round(Number(robot.supportMorale) || 0)}</small></span>
+        <span><span class="labor-robot-card-heading"><strong>${escapeHtml(supportRobotDisplayName(robot))}</strong>${laborRobotRarityMarkup(robot)}</span><small>${escapeHtml(supportRobotLocationLabel(base, robot))}<br>電力 ${Math.round(Number(robot.supportEnergy) || 0)} / 気力 ${Math.round(Number(robot.supportMorale) || 0)}</small></span>
       </button>
     `).join("") || `<div class="inventory-empty">NO SUPPORT UNIT</div>`;
     renderLaborRobotDetail(record);
-    renderLaborBlueprint();
+    renderLaborBlueprint(false);
   }
 
   function updateLaborRobotVitals() {
@@ -1446,19 +1495,33 @@
     const maxMorale = supportRobotMaxMorale(robot);
     const energy = Math.max(0, Math.min(maxEnergy, Number(robot.supportEnergy) || 0));
     const morale = Math.max(0, Math.min(maxMorale, Number(robot.supportMorale) || 0));
-    const efficiency = Math.round(supportRobotMoraleEfficiency(robot) * 100);
+    const efficiencyBreakdown = supportRobotEfficiencyBreakdown(robot);
     const energyValue = document.querySelector("[data-labor-energy-value]");
     const moraleValue = document.querySelector("[data-labor-morale-value]");
     const energyBar = document.querySelector("[data-labor-energy-bar]");
     const moraleBar = document.querySelector("[data-labor-morale-bar]");
     const cooldownValue = document.querySelector("[data-labor-cooldown-value]");
     if (energyValue) energyValue.textContent = `${Math.round(energy)} / ${Math.round(maxEnergy)}`;
-    if (moraleValue) moraleValue.textContent = `${Math.round(morale)} / ${Math.round(maxMorale)} · ${efficiency}%`;
+    if (moraleValue) moraleValue.textContent = `${Math.round(morale)} / ${Math.round(maxMorale)}`;
     if (energyBar) energyBar.style.width = `${maxEnergy ? energy / maxEnergy * 100 : 0}%`;
     if (moraleBar) moraleBar.style.width = `${maxMorale ? morale / maxMorale * 100 : 0}%`;
     if (cooldownValue) {
       cooldownValue.textContent = laborRobotStatusText(robot);
     }
+    const assignmentCount = document.querySelector("[data-labor-assignment-count]");
+    const assignmentList = document.querySelector("[data-labor-assignment-list]");
+    const speedValue = document.querySelector("[data-labor-efficiency-speed]");
+    const selfValue = document.querySelector("[data-labor-efficiency-self]");
+    const teamValue = document.querySelector("[data-labor-efficiency-team]");
+    const moraleEfficiencyValue = document.querySelector("[data-labor-efficiency-morale]");
+    const totalEfficiencyValue = document.querySelector("[data-labor-efficiency-total]");
+    if (assignmentCount) assignmentCount.textContent = `${efficiencyBreakdown.assignedTaskCount}種類`;
+    if (assignmentList) assignmentList.innerHTML = laborAssignedTaskMarkup(efficiencyBreakdown.assignedTaskTypes);
+    if (speedValue) speedValue.textContent = laborPercent(efficiencyBreakdown.baseSpeedModifier - 1, true);
+    if (selfValue) selfValue.textContent = laborPercent(efficiencyBreakdown.selfBonus, true);
+    if (teamValue) teamValue.textContent = laborPercent(efficiencyBreakdown.teamBonus, true);
+    if (moraleEfficiencyValue) moraleEfficiencyValue.textContent = laborPercent(efficiencyBreakdown.moraleEfficiency);
+    if (totalEfficiencyValue) totalEfficiencyValue.textContent = laborPercent(efficiencyBreakdown.totalEfficiency);
 
     const roster = supportRobotRoster();
     const summary = document.getElementById("labor-summary");
@@ -2028,11 +2091,9 @@
       consumeLaborEvent(event);
       return;
     }
-    const libraryModeButton = event.target.closest?.("[data-blueprint-library-mode]");
-    if (libraryModeButton) {
-      laborBlueprintLibraryMode = libraryModeButton.dataset.blueprintLibraryMode === "advanced"
-        ? "advanced"
-        : "simple";
+    const paletteGroupButton = event.target.closest?.("[data-blueprint-palette-group]");
+    if (paletteGroupButton) {
+      laborBlueprintPaletteGroup = paletteGroupButton.dataset.blueprintPaletteGroup || "TASK";
       renderLaborBlueprint();
       consumeLaborEvent(event);
       return;

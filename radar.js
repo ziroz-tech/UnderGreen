@@ -20,6 +20,7 @@
   const APPROACH_GUARANTEE_DAYS = 5;
   const RETREAT_SPEED = 0.012;
   const STATE_POLL_MS = 250;
+  const CLOSED_TICK_MS = 100;
   const GREEN = "114,255,184";
   const YELLOW = "245,214,91";
   const RED = "255,92,114";
@@ -139,6 +140,8 @@
   let sweep = 0;
   let canvasSize = 0;
   let canvasDpr = 1;
+  let frameRequestId = 0;
+  let closedTickTimer = null;
   let blackoutChatterTimer = null;
   let blackoutChatterActive = false;
   let blackoutBubbleIndex = 0;
@@ -147,9 +150,7 @@
   const blackoutBubbleTimers = new Set();
 
   tab.addEventListener("click", () => {
-    const open = !win.classList.contains("open");
-    win.classList.toggle("open", open);
-    tab.setAttribute("aria-expanded", String(open));
+    setPanelOpen(!win.classList.contains("open"));
   });
 
   muteBtn.addEventListener("click", () => {
@@ -209,6 +210,7 @@
   function setPanelOpen(open) {
     win.classList.toggle("open", open);
     tab.setAttribute("aria-expanded", String(open));
+    restartFrameLoop();
   }
 
   function readBlackoutChatterData() {
@@ -802,6 +804,8 @@
   }
 
   function frame(now) {
+    frameRequestId = 0;
+    closedTickTimer = null;
     const deltaMs = Math.min(100, Math.max(0, now - lastFrameAt));
     lastFrameAt = now;
 
@@ -820,7 +824,7 @@
         maybeStartRandomApproach();
         patrols.slice().forEach((contact) => updatePatrol(contact, deltaMs / 1000));
       }
-      drawScope();
+      if (win.classList.contains("open")) drawScope();
       updateAlert(now);
     } else {
       win.classList.remove("open", "approaching", "rapid", "caution", "danger", "imminent");
@@ -829,10 +833,30 @@
       threatOverlay.style.opacity = "0";
     }
 
-    window.requestAnimationFrame(frame);
+    scheduleNextFrame();
   }
+
+  function scheduleNextFrame() {
+    if (frameRequestId || closedTickTimer !== null) return;
+    if (win.classList.contains("open") && !document.hidden) {
+      frameRequestId = window.requestAnimationFrame(frame);
+      return;
+    }
+    closedTickTimer = window.setTimeout(() => frame(performance.now()), CLOSED_TICK_MS);
+  }
+
+  function restartFrameLoop() {
+    if (frameRequestId) window.cancelAnimationFrame(frameRequestId);
+    if (closedTickTimer !== null) window.clearTimeout(closedTickTimer);
+    frameRequestId = 0;
+    closedTickTimer = null;
+    lastFrameAt = performance.now();
+    scheduleNextFrame();
+  }
+
+  document.addEventListener("visibilitychange", restartFrameLoop);
 
   updateSnapshot(snapshot);
   scheduleNextApproach(false);
-  window.requestAnimationFrame(frame);
+  scheduleNextFrame();
 })();
